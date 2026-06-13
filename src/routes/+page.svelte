@@ -1,25 +1,52 @@
 <script>
-	import { currentDay, currentDayIndex, activeSession, personalRecords, startSession, completeSession, markExerciseComplete } from '$lib/store.js';
+	import {
+		currentDay,
+		currentDayIndex,
+		activeSession,
+		personalRecords,
+		volumePRs,
+		staleRecords,
+		exerciseSelections,
+		getActiveVariant,
+		selectVariant,
+		markCompleted,
+		startSession,
+		completeSession,
+		markExerciseComplete
+	} from '$lib/store.js';
 	import ExerciseCard from '$lib/ExerciseCard.svelte';
 	import LogModal from '$lib/LogModal.svelte';
 	import HistoryView from '$lib/HistoryView.svelte';
+	import AnalyticsView from '$lib/AnalyticsView.svelte';
 	import { program } from '$lib/program.js';
 	import { fly, fade } from 'svelte/transition';
 
 	let showLog = $state(false);
+	let selectedSlot = $state(null);
 	let selectedExercise = $state(null);
-	let showHistory = $state(false);
+	let view = $state('workout'); // 'workout' | 'history' | 'stats'
 	let sessionPRs = $state(0);
 	let showComplete = $state(false);
 
-	function handleExerciseTap(exercise) {
-		selectedExercise = exercise;
+	function activeVariant(slot) {
+		return getActiveVariant(slot, $exerciseSelections);
+	}
+
+	function handleExerciseTap(slot, variant) {
+		selectedSlot = slot;
+		selectedExercise = variant;
 		showLog = true;
 	}
 
 	function handleCloseLog() {
 		showLog = false;
+		selectedSlot = null;
 		selectedExercise = null;
+	}
+
+	function handleTick(slot, variant) {
+		markExerciseComplete(slot.id);
+		markCompleted(slot.id, variant.id);
 	}
 
 	function handleStartSession() {
@@ -55,22 +82,33 @@
 <div class="max-w-md mx-auto px-4 pb-24">
 	<!-- Header -->
 	<header class="pt-6 pb-4">
-		<div class="flex items-center justify-between mb-1">
+		<div class="flex items-center justify-between mb-3">
 			<h1 class="font-mono text-sm font-semibold tracking-widest uppercase text-text-dim">
 				Gym Tracker
 			</h1>
-			<button
-				onclick={() => showHistory = !showHistory}
-				class="font-mono text-xs text-text-muted hover:text-accent transition-colors px-2 py-1"
-			>
-				{showHistory ? 'WORKOUT' : 'HISTORY'}
-			</button>
+		</div>
+		<!-- Tab bar -->
+		<div class="flex items-center gap-1 p-1 rounded-lg bg-bg-card border border-border">
+			{#each [['workout', 'WORKOUT'], ['history', 'HISTORY'], ['stats', 'STATS']] as [key, label]}
+				<button
+					onclick={() => view = key}
+					class="flex-1 py-1.5 rounded-md font-mono text-[11px] tracking-wider transition-colors {
+						view === key ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-dim'
+					}"
+				>
+					{label}
+				</button>
+			{/each}
 		</div>
 	</header>
 
-	{#if showHistory}
+	{#if view === 'history'}
 		<div in:fly={{ y: 20, duration: 200 }}>
 			<HistoryView />
+		</div>
+	{:else if view === 'stats'}
+		<div in:fly={{ y: 20, duration: 200 }}>
+			<AnalyticsView />
 		</div>
 	{:else}
 		<!-- Day Selector -->
@@ -94,9 +132,6 @@
 				{#if $currentDay.subtitle}
 					<div class="text-sm text-text-dim">{$currentDay.subtitle}</div>
 				{/if}
-				<div class="font-mono text-xs text-text-muted mt-1">
-					{$currentDay.location}
-				</div>
 			</div>
 
 			<button
@@ -121,14 +156,20 @@
 
 		<!-- Exercise List -->
 		<div class="space-y-3">
-			{#each $currentDay.exercises as exercise, i}
+			{#each $currentDay.exercises as slot, i (slot.id)}
+				{@const variant = activeVariant(slot)}
 				<div in:fly={{ y: 20, duration: 200, delay: i * 50 }}>
 					<ExerciseCard
-						{exercise}
-						pr={$personalRecords[exercise.id]}
+						{slot}
+						exercise={variant}
+						pr={$personalRecords[variant.id]}
+						volumePr={$volumePRs[variant.id]}
+						staleDays={$staleRecords[variant.id] ?? 0}
 						isActive={isSessionActive}
-						isCompleted={completedExercises.includes(exercise.id)}
-						onTap={() => handleExerciseTap(exercise)}
+						isCompleted={completedExercises.includes(slot.id)}
+						onTap={() => handleExerciseTap(slot, variant)}
+						onTick={() => handleTick(slot, variant)}
+						onSelectVariant={(variantId) => selectVariant(slot.id, variantId)}
 					/>
 				</div>
 			{/each}
@@ -159,9 +200,6 @@
 			out:fade={{ duration: 300 }}
 		>
 			<div class="text-center" in:fly={{ y: 30, duration: 300 }}>
-				<div class="text-6xl mb-4">
-					{sessionPRs > 0 ? '' : ''}
-				</div>
 				<div class="text-2xl font-bold text-success mb-1">Session Complete</div>
 				{#if sessionPRs > 0}
 					<div class="font-mono text-pr">{sessionPRs} new PR{sessionPRs > 1 ? 's' : ''}!</div>
@@ -176,8 +214,9 @@
 	<LogModal
 		exercise={selectedExercise}
 		pr={$personalRecords[selectedExercise.id]}
+		volumePr={$volumePRs[selectedExercise.id]}
 		onClose={handleCloseLog}
-		onExerciseComplete={() => markExerciseComplete(selectedExercise.id)}
+		onExerciseComplete={() => markExerciseComplete(selectedSlot.id)}
 		onPR={handlePR}
 	/>
 {/if}
