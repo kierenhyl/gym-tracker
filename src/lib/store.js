@@ -1,5 +1,11 @@
 import { writable, derived, get } from 'svelte/store';
-import { program, slotVariants, exerciseIndex } from './program.js';
+import {
+	program,
+	slotVariants,
+	exerciseIndex,
+	movementForId,
+	movementName
+} from './program.js';
 
 // --- Config ---
 export const STALE_DAYS = 14; // a record older than this gets a "GO FOR IT" nudge
@@ -34,11 +40,27 @@ export const currentDayIndex = persist(
 	writable(loadJSON('gym_currentDay', 0))
 );
 
-// All record updates: { date, exerciseId, weight, reps }
-// (Older entries may also carry dayIndex / isMyoRepActivation — ignored here.)
+// All logged sets: { date, exerciseId, movement, method, weight, reps }
+// Records are grouped by `movement` + `method` (see `records` below).
+//
+// One-time migration: entries logged before per-movement tracking only carry
+// `exerciseId`. We stamp them with their canonical `movement` and treat every
+// historical set as `straight` (standard) — the user confirmed they had only
+// ever trained these as standard, so myorep and volume bests start empty.
+function migrateLog(log) {
+	return log.map((entry) => {
+		if (entry.movement && entry.method) return entry;
+		return {
+			...entry,
+			movement: entry.movement ?? movementForId(entry.exerciseId),
+			method: entry.method ?? 'straight'
+		};
+	});
+}
+
 export const workoutLog = persist(
 	'gym_log',
-	writable(loadJSON('gym_log', []))
+	writable(migrateLog(loadJSON('gym_log', [])))
 );
 
 // Completion ticks (trained but no new record): { date, exerciseId }
@@ -69,71 +91,77 @@ export const sessionHistory = persist(
 
 export const currentDay = derived(currentDayIndex, ($i) => program[$i]);
 
-// Strength PRs per exercise: { exerciseId: { weight, reps, date } }
-// PR = heaviest weight. If same weight, more reps wins.
-export const personalRecords = derived(workoutLog, ($log) => {
-	const prs = {};
+// A record is identified by movement + method, so the same exercise shares one
+// best across every day it appears on, while a different method (straight /
+// myorep / volume) keeps its own best.
+export function recordKey(movement, method) {
+	return `${movement}::${method}`;
+}
+
+// The movement + method a log entry belongs to (resilient to un-migrated rows).
+export function entryKey(entry) {
+	const movement = entry.movement ?? movementForId(entry.exerciseId);
+	const method = entry.method ?? 'straight';
+	return recordKey(movement, method);
+}
+
+// Best per movement+method: { 'movement::method': { weight, reps, volume, date } }
+// For volume the best is highest total volume; otherwise heaviest weight (more
+// reps wins on a tie).
+export const records = derived(workoutLog, ($log) => {
+	const recs = {};
 	for (const entry of $log) {
 		if (entry.weight == null || entry.reps == null) continue;
-		const current = prs[entry.exerciseId];
-		if (
-			!current ||
-			entry.weight > current.weight ||
-			(entry.weight === current.weight && entry.reps > current.reps)
-		) {
-			prs[entry.exerciseId] = {
-				weight: entry.weight,
-				reps: entry.reps,
-				date: entry.date
-			};
+		const method = entry.method ?? 'straight';
+		const key = entryKey(entry);
+		const volume = entry.weight * entry.reps;
+		const current = recs[key];
+		const better =
+			method === 'volume'
+				? !current || volume > current.volume
+				: !current ||
+					entry.weight > current.weight ||
+					(entry.weight === current.weight && entry.reps > current.reps);
+		if (better) {
+			recs[key] = { weight: entry.weight, reps: entry.reps, volume, date: entry.date };
 		}
 	}
-	return prs;
+	return recs;
 });
 
-// Volume PRs per exercise: { exerciseId: { weight, reps, volume, date } }
-// PR = highest total volume (weight x reps).
-export const volumePRs = derived(workoutLog, ($log) => {
-	const prs = {};
-	for (const entry of $log) {
-		if (entry.weight == null || entry.reps == null) continue;
-		const volume = entry.weight * entry.reps;
-		const current = prs[entry.exerciseId];
-		if (!current || volume > current.volume) {
-			prs[entry.exerciseId] = {
-				weight: entry.weight,
-				reps: entry.reps,
-				volume,
-				date: entry.date
-			};
-		}
-	}
-	return prs;
-});
+// The record for a given exercise variant (by its movement + method).
+export function recordFor(recs, exercise) {
+	if (!exercise) return undefined;
+	return recs[recordKey(exercise.movement, exercise.method)];
+}
 
 function daysBetween(iso, now = Date.now()) {
 	return (now - new Date(iso).getTime()) / (1000 * 60 * 60 * 24);
 }
 
 // Records that have gone stale (older than STALE_DAYS). Returns
-// { [exerciseId]: daysSince } for any exercise whose record is overdue.
-export const staleRecords = derived([personalRecords, volumePRs], ([$prs, $vol]) => {
+// { ['movement::method']: daysSince } for any record that is overdue.
+export const staleRecords = derived(records, ($recs) => {
 	const stale = {};
 	const now = Date.now();
-	const seen = new Set([...Object.keys($prs), ...Object.keys($vol)]);
-	for (const id of seen) {
-		const date = $prs[id]?.date ?? $vol[id]?.date;
-		if (!date) continue;
-		const days = daysBetween(date, now);
-		if (days >= STALE_DAYS) stale[id] = Math.floor(days);
+	for (const [key, rec] of Object.entries($recs)) {
+		const days = daysBetween(rec.date, now);
+		if (days >= STALE_DAYS) stale[key] = Math.floor(days);
 	}
 	return stale;
 });
 
-// Get all sets for a specific exercise from the log (chronological)
-export function getExerciseHistory(exerciseId) {
+// Stale days for a given exercise variant (0 if fresh / no record).
+export function staleDaysFor(stale, exercise) {
+	if (!exercise) return 0;
+	return stale[recordKey(exercise.movement, exercise.method)] ?? 0;
+}
+
+// Get all sets for a specific movement+method from the log (chronological)
+export function getExerciseHistory(movement, method) {
+	const key = recordKey(movement, method);
 	return derived(workoutLog, ($log) =>
-		$log.filter((e) => e.exerciseId === exerciseId && e.weight != null)
+		$log.filter((e) => e.weight != null && entryKey(e) === key)
 	);
 }
 
@@ -158,10 +186,11 @@ export function estimatedOneRepMax(weight, reps) {
 	return weight * (1 + reps / 30);
 }
 
-// Per-exercise progression: chronological points of e1RM (and volume) for charts.
-export function exerciseProgress(log, exerciseId) {
+// Per-record progression: chronological points of e1RM (and volume) for charts.
+// `key` is a movement::method key (see recordKey).
+export function exerciseProgress(log, key) {
 	return log
-		.filter((e) => e.exerciseId === exerciseId && e.weight != null)
+		.filter((e) => e.weight != null && entryKey(e) === key)
 		.map((e) => ({
 			date: e.date,
 			weight: e.weight,
@@ -172,23 +201,24 @@ export function exerciseProgress(log, exerciseId) {
 }
 
 // PRs achieved within the last `days` days (a record entry that was a best at the
-// time it was logged). Returns newest-first list of { exerciseId, weight, reps, date }.
+// time it was logged). Returns newest-first list of { key, weight, reps, date }.
 export function recentPRs(log, days = 30) {
 	const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 	const best = {}; // running best weight/reps as we walk forward
 	const prs = [];
 	for (const entry of log) {
 		if (entry.weight == null || entry.reps == null) continue;
-		const cur = best[entry.exerciseId];
+		const key = entryKey(entry);
+		const cur = best[key];
 		const isPR =
 			!cur ||
 			entry.weight > cur.weight ||
 			(entry.weight === cur.weight && entry.reps > cur.reps);
 		if (isPR) {
-			best[entry.exerciseId] = { weight: entry.weight, reps: entry.reps };
+			best[key] = { weight: entry.weight, reps: entry.reps };
 			if (new Date(entry.date).getTime() >= cutoff) {
 				prs.push({
-					exerciseId: entry.exerciseId,
+					key,
 					weight: entry.weight,
 					reps: entry.reps,
 					date: entry.date
@@ -208,13 +238,14 @@ export function countPRsInWindow(log, startDaysAgo, endDaysAgo) {
 	let count = 0;
 	for (const entry of log) {
 		if (entry.weight == null || entry.reps == null) continue;
-		const cur = best[entry.exerciseId];
+		const key = entryKey(entry);
+		const cur = best[key];
 		const isPR =
 			!cur ||
 			entry.weight > cur.weight ||
 			(entry.weight === cur.weight && entry.reps > cur.reps);
 		if (isPR) {
-			best[entry.exerciseId] = { weight: entry.weight, reps: entry.reps };
+			best[key] = { weight: entry.weight, reps: entry.reps };
 			const t = new Date(entry.date).getTime();
 			if (t >= start && t < end) count++;
 		}
@@ -256,7 +287,7 @@ export function totalVolumeLifted(log) {
 	);
 }
 
-// Biggest e1RM gain over the last `days` days: compares each exercise's best
+// Biggest e1RM gain over the last `days` days: compares each record's best
 // e1RM now vs its best e1RM before the window. Returns the top mover or null.
 export function biggestGain(log, days = 60) {
 	const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -264,18 +295,19 @@ export function biggestGain(log, days = 60) {
 	const after = {};
 	for (const e of log) {
 		if (e.weight == null || e.reps == null) continue;
+		const key = entryKey(e);
 		const est = estimatedOneRepMax(e.weight, e.reps);
 		const t = new Date(e.date).getTime();
-		if (t < cutoff) before[e.exerciseId] = Math.max(before[e.exerciseId] ?? 0, est);
-		else after[e.exerciseId] = Math.max(after[e.exerciseId] ?? 0, est);
+		if (t < cutoff) before[key] = Math.max(before[key] ?? 0, est);
+		else after[key] = Math.max(after[key] ?? 0, est);
 	}
 	let top = null;
-	for (const id of Object.keys(after)) {
-		const base = before[id];
+	for (const key of Object.keys(after)) {
+		const base = before[key];
 		if (!base) continue; // need a baseline to measure a gain
-		const gain = after[id] - base;
+		const gain = after[key] - base;
 		if (gain > 0 && (!top || gain > top.gain)) {
-			top = { exerciseId: id, gain, from: base, to: after[id] };
+			top = { key, gain, from: base, to: after[key] };
 		}
 	}
 	return top;
@@ -286,19 +318,53 @@ export function exerciseName(id) {
 	return exerciseIndex[id]?.name ?? id;
 }
 
+// Display label for a movement::method record key, e.g. "Cable Lateral Raise"
+// or "Cable Lateral Raise · volume".
+export function recordLabel(key) {
+	const [movement, method] = key.split('::');
+	const name = movementName(movement);
+	if (method === 'volume') return `${name} · volume`;
+	if (method === 'myorep') return `${name} · myorep`;
+	return name;
+}
+
 // --- Actions ---
 
-// Set the two numbers for an exercise: a single record entry.
+// Log a single set for an exercise. The movement + method come from the
+// exercise definition so the set lands in the right shared record bucket.
 export function updateRecord(exerciseId, weight, reps) {
+	const movement = movementForId(exerciseId);
+	const method = exerciseIndex[exerciseId]?.method ?? 'straight';
 	workoutLog.update(($log) => [
 		...$log,
 		{
 			date: new Date().toISOString(),
 			exerciseId,
+			movement,
+			method,
 			weight: parseFloat(weight),
 			reps: parseInt(reps)
 		}
 	]);
+}
+
+// Correct a previously logged set. `entry` must be the same object instance
+// held in the log (pass entries straight from the store, e.g. via
+// getExerciseHistory). Matched by reference so duplicate weight/rep/date rows
+// stay distinct.
+export function editLogEntry(entry, weight, reps) {
+	const w = parseFloat(weight);
+	const r = parseInt(reps);
+	if (isNaN(w) || isNaN(r) || w <= 0 || r <= 0) return;
+	workoutLog.update(($log) =>
+		$log.map((e) => (e === entry ? { ...e, weight: w, reps: r } : e))
+	);
+}
+
+// Remove a logged set (e.g. one entered by mistake). Matched by reference, see
+// editLogEntry.
+export function deleteLogEntry(entry) {
+	workoutLog.update(($log) => $log.filter((e) => e !== entry));
 }
 
 // Tick an exercise as completed (trained, no new record). Tracked by slot id.

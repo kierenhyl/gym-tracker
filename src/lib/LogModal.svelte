@@ -2,10 +2,9 @@
 	import { updateRecord, VOLUME_LOAD_PCT } from './store.js';
 	import { fly, fade } from 'svelte/transition';
 
-	let { exercise, pr, volumePr, onClose, onExerciseComplete, onPR } = $props();
+	let { exercise, record, onClose, onExerciseComplete, onPR } = $props();
 
 	let isVolume = $derived(exercise.method === 'volume');
-	let record = $derived(isVolume ? volumePr : pr);
 
 	let weight = $state(record?.weight ?? '');
 	let reps = $state(record?.reps ?? '');
