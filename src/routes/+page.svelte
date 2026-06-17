@@ -3,9 +3,10 @@
 		currentDay,
 		currentDayIndex,
 		activeSession,
-		personalRecords,
-		volumePRs,
+		records,
 		staleRecords,
+		recordFor,
+		staleDaysFor,
 		exerciseSelections,
 		getActiveVariant,
 		selectVariant,
@@ -175,9 +176,8 @@
 					<ExerciseCard
 						{slot}
 						exercise={variant}
-						pr={$personalRecords[variant.id]}
-						volumePr={$volumePRs[variant.id]}
-						staleDays={$staleRecords[variant.id] ?? 0}
+						record={recordFor($records, variant)}
+						staleDays={staleDaysFor($staleRecords, variant)}
 						isActive={isSessionActive}
 						isCompleted={completedExercises.includes(slot.id)}
 						onTap={() => handleExerciseTap(slot, variant)}
@@ -227,8 +227,7 @@
 {#if showLog && selectedExercise}
 	<LogModal
 		exercise={selectedExercise}
-		pr={$personalRecords[selectedExercise.id]}
-		volumePr={$volumePRs[selectedExercise.id]}
+		record={recordFor($records, selectedExercise)}
 		onClose={handleCloseLog}
 		onExerciseComplete={() => markExerciseComplete(selectedSlot.id)}
 		onPR={handlePR}

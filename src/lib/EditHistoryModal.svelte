@@ -1,15 +1,31 @@
 <script>
 	import { workoutLog, editLogEntry, deleteLogEntry } from './store.js';
+	import { movementForId } from './program.js';
 	import { fly, fade, slide } from 'svelte/transition';
 
 	let { exercise, onClose } = $props();
 
 	let isVolume = $derived(exercise.method === 'volume');
+	let methodLabel = $derived(
+		exercise.method === 'myorep'
+			? 'MYO-REP'
+			: exercise.method === 'volume'
+				? 'HIGH VOLUME'
+				: 'STRAIGHT'
+	);
 
-	// All logged sets for this exercise, newest first. References point straight
-	// at the store objects so edit/delete can match them.
+	// All logged sets for this movement + method, newest first. References point
+	// straight at the store objects so edit/delete can match them. The same
+	// movement on other days (and other methods) shares / separates accordingly.
 	let entries = $derived(
-		$workoutLog.filter((e) => e.exerciseId === exercise.id && e.weight != null).reverse()
+		$workoutLog
+			.filter(
+				(e) =>
+					e.weight != null &&
+					(e.movement ?? movementForId(e.exerciseId)) === exercise.movement &&
+					(e.method ?? 'straight') === exercise.method
+			)
+			.reverse()
 	);
 
 	// The entry that currently counts as the record, so we can flag it.
@@ -85,9 +101,14 @@
 
 		<div class="mb-4">
 			<div class="font-mono text-[10px] text-text-muted tracking-widest mb-1">EDIT HISTORY</div>
-			<h2 class="text-xl font-bold">{exercise.name}</h2>
+			<div class="flex items-center gap-2">
+				<h2 class="text-xl font-bold">{exercise.name}</h2>
+				<span class="font-mono text-[9px] font-semibold tracking-widest px-1.5 py-0.5 rounded {isVolume ? 'text-success bg-success/10' : exercise.method === 'myorep' ? 'text-accent bg-accent/10' : 'text-text-dim bg-bg-input'}">
+					{methodLabel}
+				</span>
+			</div>
 			<p class="font-mono text-[11px] text-text-dim mt-1">
-				The {isVolume ? 'volume PR' : 'best'} updates automatically from these sets.
+				Shared across every day you do this as {isVolume ? 'high-volume' : exercise.method === 'myorep' ? 'myo-reps' : 'a straight set'}. The {isVolume ? 'volume PR' : 'best'} updates from these sets.
 			</p>
 		</div>
 

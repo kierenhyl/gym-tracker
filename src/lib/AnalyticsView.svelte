@@ -10,7 +10,8 @@
 		totalVolumeLifted,
 		biggestGain,
 		exerciseProgress,
-		exerciseName
+		entryKey,
+		recordLabel
 	} from './store.js';
 
 	// --- Headline stats ---
@@ -34,18 +35,18 @@
 	// --- Stale "GO FOR IT" list ---
 	let stale = $derived(
 		Object.entries($staleRecords)
-			.map(([id, days]) => ({ id, days, name: exerciseName(id) }))
+			.map(([key, days]) => ({ key, days, name: recordLabel(key) }))
 			.sort((a, b) => b.days - a.days)
 			.slice(0, 8)
 	);
 
-	// --- Per-exercise e1RM progression (exercises with >= 2 records) ---
+	// --- Per-record e1RM progression (records with >= 2 logs) ---
 	let charts = $derived.by(() => {
-		const ids = [...new Set($workoutLog.filter((e) => e.weight != null).map((e) => e.exerciseId))];
-		return ids
-			.map((id) => {
-				const points = exerciseProgress($workoutLog, id);
-				return { id, name: exerciseName(id), points };
+		const keys = [...new Set($workoutLog.filter((e) => e.weight != null).map(entryKey))];
+		return keys
+			.map((key) => {
+				const points = exerciseProgress($workoutLog, key);
+				return { key, name: recordLabel(key), points };
 			})
 			.filter((c) => c.points.length >= 2)
 			.sort((a, b) => new Date(b.points.at(-1).date) - new Date(a.points.at(-1).date))
@@ -120,7 +121,7 @@
 			<div class="rounded-xl bg-success/5 border border-success/20 p-3 mb-4">
 				<div class="font-mono text-[10px] text-success/70 tracking-wider">BIGGEST GAIN · 60D</div>
 				<div class="flex items-baseline justify-between mt-1">
-					<div class="font-semibold text-sm">{exerciseName(topGain.exerciseId)}</div>
+					<div class="font-semibold text-sm">{recordLabel(topGain.key)}</div>
 					<div class="font-mono text-sm text-success">
 						+{fmtNum(topGain.gain)}kg e1RM
 					</div>
@@ -190,7 +191,7 @@
 					{#each recent as pr}
 						<div class="flex items-center justify-between px-3 py-2 rounded-lg bg-bg-card border border-border">
 							<div>
-								<div class="text-sm font-medium">{exerciseName(pr.exerciseId)}</div>
+								<div class="text-sm font-medium">{recordLabel(pr.key)}</div>
 								<div class="font-mono text-[10px] text-text-muted">{fmtDate(pr.date)}</div>
 							</div>
 							<div class="font-mono text-sm font-bold text-pr">{pr.weight}kg x {pr.reps}</div>
