@@ -11,7 +11,8 @@
 		isCompleted,
 		onTap,
 		onTick,
-		onSelectVariant
+		onSelectVariant,
+		onEditHistory
 	} = $props();
 
 	let pickerOpen = $state(false);
@@ -93,13 +94,13 @@
 	</div>
 
 	<!-- Main tappable body -->
-	<button
-		onclick={onTap}
-		disabled={!isActive}
-		class="w-full text-left px-4 pb-4 pt-2 {isActive ? 'cursor-pointer active:scale-[0.99]' : ''} transition-transform"
-	>
+	<div class="px-4 pb-4 pt-2">
 		<div class="flex items-start justify-between gap-3">
-			<div class="flex-1 min-w-0">
+			<button
+				onclick={onTap}
+				disabled={!isActive}
+				class="flex-1 min-w-0 text-left {isActive ? 'cursor-pointer active:scale-[0.99]' : ''} transition-transform"
+			>
 				<h3 class="font-semibold text-[15px] leading-tight mb-1.5 {isCompleted ? 'text-success/80' : ''}">
 					{exercise.name}
 				</h3>
@@ -114,11 +115,15 @@
 						<span class="font-mono text-[10px] text-pr/70">{staleDays}d since record</span>
 					</div>
 				{/if}
-			</div>
+			</button>
 
-			<!-- Record badge -->
-			{#if record}
-				<div class="flex-shrink-0 text-right">
+			<!-- Record badge — tap to edit/correct logged sets -->
+			<button
+				onclick={() => onEditHistory?.()}
+				aria-label="Edit record history"
+				class="flex-shrink-0 text-right rounded-lg -mr-1 px-1 py-0.5 hover:bg-bg-input/50 transition-colors active:scale-95"
+			>
+				{#if record}
 					<div class="font-mono text-[10px] text-text-muted tracking-wider mb-0.5">
 						{isVolume ? 'VOL PR' : 'BEST'}
 					</div>
@@ -127,15 +132,13 @@
 					{#if isVolume}
 						<div class="font-mono text-[10px] text-success/80 mt-0.5">{record.volume} vol</div>
 					{/if}
-				</div>
-			{:else}
-				<div class="flex-shrink-0 text-right">
+				{:else}
 					<div class="font-mono text-[10px] text-accent/70 tracking-wider">SET FIRST</div>
 					<div class="font-mono text-[10px] text-accent/70">RECORD</div>
-				</div>
-			{/if}
+				{/if}
+			</button>
 		</div>
-	</button>
+	</div>
 
 	<!-- Variant picker -->
 	{#if pickerOpen && slot}

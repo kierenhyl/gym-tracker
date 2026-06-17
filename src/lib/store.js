@@ -301,6 +301,25 @@ export function updateRecord(exerciseId, weight, reps) {
 	]);
 }
 
+// Correct a previously logged set. `entry` must be the same object instance
+// held in the log (pass entries straight from the store, e.g. via
+// getExerciseHistory). Matched by reference so duplicate weight/rep/date rows
+// stay distinct.
+export function editLogEntry(entry, weight, reps) {
+	const w = parseFloat(weight);
+	const r = parseInt(reps);
+	if (isNaN(w) || isNaN(r) || w <= 0 || r <= 0) return;
+	workoutLog.update(($log) =>
+		$log.map((e) => (e === entry ? { ...e, weight: w, reps: r } : e))
+	);
+}
+
+// Remove a logged set (e.g. one entered by mistake). Matched by reference, see
+// editLogEntry.
+export function deleteLogEntry(entry) {
+	workoutLog.update(($log) => $log.filter((e) => e !== entry));
+}
+
 // Tick an exercise as completed (trained, no new record). Tracked by slot id.
 export function markCompleted(slotId, exerciseId) {
 	completionLog.update(($log) => [

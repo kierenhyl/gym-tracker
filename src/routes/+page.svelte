@@ -16,6 +16,7 @@
 	} from '$lib/store.js';
 	import ExerciseCard from '$lib/ExerciseCard.svelte';
 	import LogModal from '$lib/LogModal.svelte';
+	import EditHistoryModal from '$lib/EditHistoryModal.svelte';
 	import HistoryView from '$lib/HistoryView.svelte';
 	import AnalyticsView from '$lib/AnalyticsView.svelte';
 	import { program } from '$lib/program.js';
@@ -24,6 +25,8 @@
 	let showLog = $state(false);
 	let selectedSlot = $state(null);
 	let selectedExercise = $state(null);
+	let showEditHistory = $state(false);
+	let editHistoryExercise = $state(null);
 	let view = $state('workout'); // 'workout' | 'history' | 'stats'
 	let sessionPRs = $state(0);
 	let showComplete = $state(false);
@@ -42,6 +45,16 @@
 		showLog = false;
 		selectedSlot = null;
 		selectedExercise = null;
+	}
+
+	function handleEditHistory(variant) {
+		editHistoryExercise = variant;
+		showEditHistory = true;
+	}
+
+	function handleCloseEditHistory() {
+		showEditHistory = false;
+		editHistoryExercise = null;
 	}
 
 	function handleTick(slot, variant) {
@@ -170,6 +183,7 @@
 						onTap={() => handleExerciseTap(slot, variant)}
 						onTick={() => handleTick(slot, variant)}
 						onSelectVariant={(variantId) => selectVariant(slot.id, variantId)}
+						onEditHistory={() => handleEditHistory(variant)}
 					/>
 				</div>
 			{/each}
@@ -218,5 +232,13 @@
 		onClose={handleCloseLog}
 		onExerciseComplete={() => markExerciseComplete(selectedSlot.id)}
 		onPR={handlePR}
+	/>
+{/if}
+
+<!-- Edit History Modal -->
+{#if showEditHistory && editHistoryExercise}
+	<EditHistoryModal
+		exercise={editHistoryExercise}
+		onClose={handleCloseEditHistory}
 	/>
 {/if}
