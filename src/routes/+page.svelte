@@ -32,6 +32,37 @@
 	let sessionPRs = $state(0);
 	let showComplete = $state(false);
 
+	function downloadMigrationBackup() {
+		const storageKeys = [
+			'gym_currentDay',
+			'gym_log',
+			'gym_completions',
+			'gym_selections',
+			'gym_session',
+			'gym_history'
+		];
+		const keys = Object.fromEntries(
+			storageKeys.map((key) => {
+				const raw = localStorage.getItem(key);
+				if (raw === null) return [key, null];
+				try {
+					return [key, JSON.parse(raw)];
+				} catch {
+					return [key, raw];
+				}
+			})
+		);
+		const backup = { exportedAt: new Date().toISOString(), keys };
+		const href = URL.createObjectURL(
+			new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+		);
+		const anchor = document.createElement('a');
+		anchor.href = href;
+		anchor.download = `gym-tracker-migration-${new Date().toISOString().slice(0, 10)}.json`;
+		anchor.click();
+		setTimeout(() => URL.revokeObjectURL(href), 1000);
+	}
+
 	function activeVariant(slot) {
 		return getActiveVariant(slot, $exerciseSelections);
 	}
@@ -100,6 +131,12 @@
 			<h1 class="font-mono text-sm font-semibold tracking-widest uppercase text-text-dim">
 				Gym Tracker
 			</h1>
+			<button
+				onclick={downloadMigrationBackup}
+				class="font-mono text-[9px] tracking-wider px-2.5 py-1.5 rounded-lg bg-accent/10 border border-accent/30 text-accent"
+			>
+				DOWNLOAD MIGRATION BACKUP
+			</button>
 		</div>
 		<!-- Tab bar -->
 		<div class="flex items-center gap-1 p-1 rounded-lg bg-bg-card border border-border">
