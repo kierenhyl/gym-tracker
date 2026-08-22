@@ -33,8 +33,19 @@ The old `method` field conflated two different things. They are now separate:
 | Band | Reps | Purpose |
 |---|---|---|
 | Heavy | 1–5 | Express and re-anchor strength |
-| Moderate | 6–12 | The default. Most of your work. |
-| Volume | 13+ | Isolation, joint-friendly work, under-recovered days |
+| Moderate | 6–15 | The default. Most of the work. |
+| Volume | 16+ | Isolation, joint-friendly work, under-recovered days |
+
+The moderate/volume line sits at 15, not the more conventional 12, because the
+boundaries are fitted to this programme rather than the other way round. With a
+6–12 moderate band, 18 of the programme's 26 movements have a prescribed rep
+range straddling a boundary — 10-15 and 8-15 appear everywhere. At 6–15 only
+four straddle, and all four are myo-rep movements, which are bucketed
+separately anyway. In practice nothing straddles.
+
+Because the moderate band now reaches 15 reps, the estimated-1RM calculation
+clamps reps at 12 (`E1RM_REP_CAP`). Epley inflates badly past that, and a set of
+15 must not score as a bigger 1RM than it really represents.
 
 A set is filed by what you did, so a good high-rep day is compared against
 high-rep history. If the reps land in a band the exercise is not eligible for,
@@ -65,17 +76,30 @@ Heavy work is allowed only where the setup is stable and a near-maximal effort
 does not depend on stabiliser fatigue or spinal position. See `HEAVY_ELIGIBLE`
 in `program.js`.
 
-**Allowed:** smith / barbell / machine chest press, incline smith and machine
-incline press, machine and smith shoulder press, hack squat, leg press, smith
-squat, pendulum squat, all pulldowns, assisted pull-up, chest-supported row,
-machine row.
+**Allowed (8 of 26):** smith bench press, machine shoulder press, machine
+incline press, chest-supported row, machine row, neutral-grip pulldown, hack
+squat, machine hip thrust.
 
-**Capped at moderate:** barbell row, Pendlay row, T-bar row, seated cable row,
-RDL and DB RDL (sub-6 hinging is where backs go), all unilateral leg work, all
-dumbbell pressing (stabiliser-limited).
+**Capped at moderate:** everything else — all dumbbell work (stabiliser
+limited), all cable isolation, the half-kneeling pulldown (unstable by design),
+leg extension and seated hamstring curl (knee and hamstring risk under
+near-maximal load), Pallof press (an anti-rotation drill, not a loadable lift).
 
-**Volume-primary:** every isolation movement — lateral raises, rear delts,
-face pulls, flies, curls, triceps, calves, abs, leg curls and extensions.
+The programme itself never prescribes heavy work: its lowest range is 6–10. The
+heavy band is therefore only ever reached through the periodic heavy test. The
+one leg exercise per day is programmed at exactly one set, which happens to be
+the right shape for a heavy test anyway.
+
+## Load steps, and where they are not available
+
+Smallest realistic jump is 2.5kg on a bar or dumbbell, 5kg on a plate-loaded
+machine or a stack. On four movements — cable lateral raise, reverse pec deck,
+reverse cable crossover, pec deck — a 5kg stack step is 30–50% of the working
+load. Single-step load progression is not really available there, which is
+presumably why they are programmed 12–20 rather than 8–12. Those movements are
+flagged `REP_PROGRESSION_ONLY`: they chase reps to the top of the range, and a
+load step is presented as an event that will drop reps sharply, not a routine
+increment.
 
 ## The prescription engine
 
@@ -130,7 +154,10 @@ Three checks on the stats tab:
 2. **RIR drift** → if most sets in each of the last two sessions went to
    failure, that is accumulated fatigue, not a strength problem.
 3. **Weekly hard sets per muscle** → programmed sets from completed sessions
-   over 7 days, against a 10–20 target band.
+   over 7 days, against a 10–20 target band. Leg muscles are excluded
+   (`GUARDRAIL_EXEMPT_MUSCLES`): one exercise at one set per day is the
+   programme's deliberate recovery choice, asserted by
+   `scripts/verify-program.js`, not an accident to flag.
 
 ## Equipment variations
 
@@ -141,6 +168,12 @@ it with calibration offsets, you can add your own variation from inside the app
 records, so numbers stay apples-to-apples. When you have no history on the
 variant you picked, the app shows a sibling's best as a **reference**, not a
 target, and treats the session as calibration.
+
+The programme deliberately ships no built-in alternatives — `verify-program.js`
+asserts there are none, and switching was previously disabled outright on the
+grounds that the researched primary movement should always win. User-created
+variations are the only swap mechanism, which keeps that intent: the programme
+is still fixed, you are only naming which physical station you used.
 
 ## Migrated data
 

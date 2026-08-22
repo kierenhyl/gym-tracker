@@ -118,8 +118,8 @@ export function prescribe({
 	const increment = exercise.increment ?? 5;
 
 	const [lo, hi] = isMyo
-		? (exercise.targetReps?.[exercise.defaultBand] ?? BANDS.volume.defaultTarget)
-		: (exercise.targetReps?.[band] ?? BANDS[band].defaultTarget);
+		? (exercise.targetReps?.myo ?? BANDS.volume.defaultTarget)
+		: (exercise.targetReps?.[band] ?? BANDS[band]?.defaultTarget ?? BANDS.moderate.defaultTarget);
 
 	const sessions = sessionsIn(history, bucket, exercise.bands);
 	const last = sessions[sessions.length - 1];
@@ -196,6 +196,15 @@ export function prescribe({
 			targetReps = hi;
 			headline = `${lastLoad}kg × ${hi}`;
 			reason = `You hit the top of the range but had nothing left. Repeat ${lastLoad}kg once to own it, then we add ${increment}kg.`;
+		} else if (exercise.repProgressionOnly) {
+			// The smallest available step here is 30-50% of the working load, so
+			// reps will fall a long way. Say so, or it reads as going backwards.
+			kind = 'add-load';
+			targetLoad = roundLoad(lastLoad + increment);
+			const jump = Math.round((increment / lastLoad) * 100);
+			targetReps = lo;
+			headline = `${targetLoad}kg × ${lo}+`;
+			reason = `You owned ${lastReps} at ${lastLoad}kg. The smallest step up is ${increment}kg, which is a ${jump}% jump on a movement this size — expect reps to drop well below ${lastReps}, maybe to ${lo}. That is normal here, not a regression. Build back up on reps.`;
 		} else {
 			kind = 'add-load';
 			targetLoad = roundLoad(lastLoad + increment);

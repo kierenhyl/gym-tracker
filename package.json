@@ -7,15 +7,18 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "db:migrate": "node --env-file=.env.local scripts/migrate.js",
+    "verify:program": "node scripts/verify-program.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@sveltejs/adapter-static": "^3.0.10",
+    "@neondatabase/serverless": "^1.1.0",
+    "@sveltejs/adapter-vercel": "^6.3.4",
     "@sveltejs/kit": "^2.55.0",
-    "@sveltejs/vite-plugin-svelte": "^4.0.4",
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
     "@tailwindcss/vite": "^4.2.1",
     "svelte": "^5.53.12",
     "tailwindcss": "^4.2.1",

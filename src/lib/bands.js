@@ -13,10 +13,15 @@
 // sets and 'myo' for myo-reps (a myo-rep set is a different animal and must
 // never be compared to a straight set).
 
+// Boundaries are tuned to the actual programme, not the other way round.
+// With a 6-12 moderate band, 18 of the programme's 26 movements had a
+// prescribed rep range straddling a boundary (10-15 and 8-15 are everywhere).
+// Moving the line to 15 leaves 4 straddlers, all of them myo-rep movements,
+// which are bucketed separately anyway — so in practice nothing straddles.
 export const BANDS = {
 	heavy: { key: 'heavy', label: 'HEAVY', min: 1, max: 5, defaultTarget: [3, 5] },
-	moderate: { key: 'moderate', label: 'MODERATE', min: 6, max: 12, defaultTarget: [8, 10] },
-	volume: { key: 'volume', label: 'VOLUME', min: 13, max: Infinity, defaultTarget: [15, 20] }
+	moderate: { key: 'moderate', label: 'MODERATE', min: 6, max: 15, defaultTarget: [8, 12] },
+	volume: { key: 'volume', label: 'VOLUME', min: 16, max: Infinity, defaultTarget: [16, 20] }
 };
 
 export const BAND_ORDER = ['heavy', 'moderate', 'volume'];
@@ -76,11 +81,14 @@ export function bucketLabel(bucket) {
 
 // --- Scoring ---
 
-// Epley estimated 1RM. Only trustworthy up to ~12 reps, which is exactly the
-// range (heavy + moderate) where we use it.
+// Epley estimated 1RM. It inflates badly at high rep counts, so reps are
+// clamped at 12 for the estimate. The moderate band now runs to 15, and a set
+// of 15 must not score as a bigger 1RM than it really represents.
+export const E1RM_REP_CAP = 12;
+
 export function estimatedOneRepMax(weight, reps) {
 	const w = Number(weight);
-	const r = Number(reps);
+	const r = Math.min(Number(reps) || 0, E1RM_REP_CAP);
 	if (!w || !r) return 0;
 	return w * (1 + r / 30);
 }
