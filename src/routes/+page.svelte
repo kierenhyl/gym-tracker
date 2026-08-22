@@ -3,18 +3,28 @@
 		currentDay,
 		currentDayIndex,
 		activeSession,
+		workoutLog,
 		records,
 		staleRecords,
-		recordFor,
+		recordKey,
+		recordsFor,
 		staleDaysFor,
 		exerciseSelections,
+		customVariants,
+		customVariantsFor,
 		getActiveVariant,
 		selectVariant,
+		addCustomVariant,
+		removeCustomVariant,
 		markCompleted,
 		startSession,
 		completeSession,
-		markExerciseComplete
+		markExerciseComplete,
+		prescriptionFor,
+		READINESS,
+		READINESS_LABELS
 	} from '$lib/store.js';
+	import { slotVariants } from '$lib/program.js';
 	import ExerciseCard from '$lib/ExerciseCard.svelte';
 	import LogModal from '$lib/LogModal.svelte';
 	import EditHistoryModal from '$lib/EditHistoryModal.svelte';
@@ -31,6 +41,18 @@
 	let view = $state('workout'); // 'workout' | 'history' | 'stats'
 	let sessionPRs = $state(0);
 	let showComplete = $state(false);
+	let pendingReadiness = $state('normal');
+
+	// Readiness scales today's instructions: on a rough day the app tells you to
+	// match your last session rather than beat it, and never programmes a heavy
+	// test. Defaults to normal before a session starts.
+	let readiness = $derived($activeSession?.readiness ?? 'normal');
+
+	const READINESS_BLURB = {
+		low: 'Slept badly, sore, stressed — match, don\'t chase',
+		normal: 'Business as usual',
+		high: 'Fresh and ready to push'
+	};
 
 	function downloadMigrationBackup() {
 		const storageKeys = [
@@ -38,6 +60,7 @@
 			'gym_log',
 			'gym_completions',
 			'gym_selections',
+			'gym_customVariants',
 			'gym_session',
 			'gym_history'
 		];
@@ -64,7 +87,22 @@
 	}
 
 	function activeVariant(slot) {
-		return getActiveVariant(slot, $exerciseSelections);
+		return getActiveVariant(slot, $exerciseSelections, $customVariants);
+	}
+
+	function variantsFor(slot) {
+		return slotVariants(slot, customVariantsFor($customVariants, slot.id));
+	}
+
+	// Every band's record for a movement, keyed by bucket — the log modal needs
+	// them all, because the band you land in may not be the one prescribed.
+	function bucketRecordsFor(variant) {
+		const out = {};
+		for (const bucket of ['heavy', 'moderate', 'volume', 'myo']) {
+			const rec = $records[recordKey(variant.movement, bucket)];
+			if (rec) out[bucket] = rec;
+		}
+		return out;
 	}
 
 	function handleExerciseTap(slot, variant) {
@@ -95,11 +133,11 @@
 	}
 
 	function handleStartSession() {
-		startSession($currentDayIndex);
+		startSession($currentDayIndex, pendingReadiness);
 	}
 
 	function handleFinishSession() {
-		completeSession($currentDayIndex, sessionPRs);
+		completeSession($currentDayIndex, sessionPRs, readiness);
 		sessionPRs = 0;
 		showComplete = true;
 		setTimeout(() => { showComplete = false; }, 2500);
@@ -197,29 +235,52 @@
 
 		<!-- Session Control -->
 		{#if !isSessionActive}
-			<button
-				onclick={handleStartSession}
-				class="w-full py-4 mb-6 rounded-xl bg-accent/10 border border-accent/30 text-accent font-semibold text-lg hover:bg-accent/20 transition-all active:scale-[0.98]"
-			>
-				Start Session
-			</button>
+			<div class="mb-6">
+				<div class="font-mono text-[10px] text-text-muted tracking-wider mb-2">
+					HOW ARE YOU FEELING TODAY?
+				</div>
+				<div class="grid grid-cols-3 gap-2 mb-3">
+					{#each READINESS as level}
+						<button
+							onclick={() => (pendingReadiness = level)}
+							class="py-2.5 rounded-xl border font-mono text-[11px] font-bold tracking-wider transition-all active:scale-[0.97] {pendingReadiness === level
+								? 'bg-accent/15 border-accent/40 text-accent'
+								: 'bg-bg-card border-border text-text-dim hover:border-border-focus'}"
+						>
+							{READINESS_LABELS[level]}
+						</button>
+					{/each}
+				</div>
+				<p class="font-mono text-[10px] text-text-muted mb-3">{READINESS_BLURB[pendingReadiness]}</p>
+				<button
+					onclick={handleStartSession}
+					class="w-full py-4 rounded-xl bg-accent/10 border border-accent/30 text-accent font-semibold text-lg hover:bg-accent/20 transition-all active:scale-[0.98]"
+				>
+					Start Session
+				</button>
+			</div>
 		{/if}
 
 		<!-- Exercise List -->
 		<div class="space-y-3">
 			{#each $currentDay.exercises as slot, i (slot.id)}
 				{@const variant = activeVariant(slot)}
+				{@const rx = prescriptionFor($workoutLog, slot, variant, readiness)}
 				<div in:fly={{ y: 20, duration: 200, delay: i * 50 }}>
 					<ExerciseCard
 						{slot}
 						exercise={variant}
-						record={recordFor($records, variant)}
-						staleDays={staleDaysFor($staleRecords, variant)}
+						variants={variantsFor(slot)}
+						bandRecords={recordsFor($records, variant)}
+						prescription={rx}
+						staleDays={staleDaysFor($staleRecords, variant, rx?.bucket)}
 						isActive={isSessionActive}
 						isCompleted={completedExercises.includes(slot.id)}
 						onTap={() => handleExerciseTap(slot, variant)}
 						onTick={() => handleTick(slot, variant)}
 						onSelectVariant={(variantId) => selectVariant(slot.id, variantId)}
+						onAddVariant={(name) => addCustomVariant(slot.id, name)}
+						onRemoveVariant={(variantId) => removeCustomVariant(slot.id, variantId)}
 						onEditHistory={() => handleEditHistory(variant)}
 					/>
 				</div>
@@ -264,7 +325,9 @@
 {#if showLog && selectedExercise}
 	<LogModal
 		exercise={selectedExercise}
-		record={recordFor($records, selectedExercise)}
+		prescription={prescriptionFor($workoutLog, selectedSlot, selectedExercise, readiness)}
+		bucketRecords={bucketRecordsFor(selectedExercise)}
+		{readiness}
 		onClose={handleCloseLog}
 		onExerciseComplete={() => markExerciseComplete(selectedSlot.id)}
 		onPR={handlePR}

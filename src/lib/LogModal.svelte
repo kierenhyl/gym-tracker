@@ -1,39 +1,71 @@
 <script>
-	import { updateRecord, VOLUME_LOAD_PCT } from './store.js';
+	import { updateRecord } from './store.js';
+	import { bucketLabel, classifyBand, nearestEligibleBand, scoreFor, formatScore } from './bands.js';
+	import { KIND_LABELS } from './prescribe.js';
 	import { fly, fade } from 'svelte/transition';
 
-	let { exercise, record, onClose, onExerciseComplete, onPR } = $props();
+	// bucketRecords: { [bucket]: record } for this movement — we need every band,
+	// because the band you actually land in may not be the one prescribed.
+	let { exercise, prescription, bucketRecords = {}, readiness, onClose, onExerciseComplete, onPR } =
+		$props();
 
-	let isVolume = $derived(exercise.method === 'volume');
+	let isMyo = $derived(exercise.structure === 'myorep');
 
-	let weight = $state(record?.weight ?? '');
-	let reps = $state(record?.reps ?? '');
+	// Prefill from today's instruction, not from an all-time PR.
+	let weight = $state(prescription?.targetLoad ?? prescription?.last?.weight ?? '');
+	let reps = $state(prescription?.targetReps ?? '');
+	let totalReps = $state('');
+	let rir = $state(null);
 	let showPRFlash = $state(false);
 
-	// For volume exercises, suggest a working load at ~60% of the best weight.
-	let suggestedLoad = $derived(
-		isVolume && record?.weight
-			? Math.round(record.weight * VOLUME_LOAD_PCT * 2) / 2
-			: null
+	let w = $derived(parseFloat(weight));
+	let r = $derived(parseInt(reps));
+	let tr = $derived(parseInt(totalReps));
+	let valid = $derived(!isNaN(w) && !isNaN(r) && w > 0 && r > 0);
+
+	// Which band these reps actually land in — shown live, so it is never a
+	// surprise which record you are competing against.
+	let liveBucket = $derived(
+		!valid
+			? null
+			: isMyo
+				? 'myo'
+				: nearestEligibleBand(classifyBand(r), exercise.bands)
 	);
 
-	// Would the entered numbers beat the current record?
-	let beatsRecord = $derived.by(() => {
-		const w = parseFloat(weight);
-		const r = parseInt(reps);
-		if (isNaN(w) || isNaN(r) || w <= 0 || r <= 0) return false;
-		if (!record) return true;
-		if (isVolume) return w * r > record.volume;
-		return w > record.weight || (w === record.weight && r > record.reps);
-	});
+	let repsForScore = $derived(isMyo && !isNaN(tr) && tr > 0 ? tr : r);
+	let liveScore = $derived(valid && liveBucket ? scoreFor(liveBucket, w, repsForScore) : 0);
+
+	// The record shown up front is the one for today's prescribed band.
+	let bucketRecord = $derived(bucketRecords[prescription?.bucket ?? exercise.defaultBand]);
+
+	// ...but you are only ever judged against the band you actually landed in.
+	let liveRecord = $derived(liveBucket ? bucketRecords[liveBucket] : null);
+	let beatsRecord = $derived(
+		valid && !!liveBucket && (!liveRecord || liveScore > liveRecord.score)
+	);
+
+	let hitTarget = $derived(
+		valid && prescription?.targetReps != null && (isMyo ? repsForScore : r) >= prescription.targetReps
+	);
+
+	const RIR_OPTIONS = [
+		{ value: 2, label: 'HAD 2+ MORE', hint: 'left reps in the tank' },
+		{ value: 1, label: 'HAD 1 MORE', hint: 'about right' },
+		{ value: 0, label: 'NOTHING LEFT', hint: 'went to failure' }
+	];
 
 	function handleSave() {
-		const w = parseFloat(weight);
-		const r = parseInt(reps);
-		if (isNaN(w) || isNaN(r) || w <= 0 || r <= 0) return;
-
+		if (!valid) return;
 		const isPR = beatsRecord;
-		updateRecord(exercise.id, w, r);
+		updateRecord(exercise.id, w, r, {
+			rir,
+			totalReps: isMyo ? tr : null,
+			readiness,
+			movement: exercise.movement,
+			structure: exercise.structure,
+			bands: exercise.bands
+		});
 
 		if (isPR) {
 			showPRFlash = true;
@@ -45,10 +77,6 @@
 		} else {
 			finish();
 		}
-	}
-
-	function handleMarkDone() {
-		finish();
 	}
 
 	function finish() {
@@ -74,41 +102,52 @@
 	out:fly={{ y: 300, duration: 200, opacity: 1 }}
 >
 	<div class="max-w-md mx-auto bg-bg-card rounded-t-2xl border-t border-x border-border p-5 pb-8">
-		<!-- Handle bar -->
 		<div class="w-10 h-1 rounded-full bg-border mx-auto mb-5"></div>
 
 		<!-- Exercise Info -->
-		<div class="mb-5">
+		<div class="mb-4">
 			<div class="flex items-center gap-2 mb-1">
-				<span class="font-mono text-[10px] font-semibold tracking-widest {isVolume ? 'text-success' : exercise.method === 'myorep' ? 'text-accent' : 'text-text-dim'}">
-					{isVolume ? 'HIGH VOLUME' : exercise.method === 'myorep' ? 'MYO-REP' : 'STRAIGHT'}
+				<span class="font-mono text-[10px] font-semibold tracking-widest {isMyo ? 'text-accent' : prescription?.band === 'heavy' ? 'text-pr' : prescription?.band === 'volume' ? 'text-success' : 'text-text-dim'}">
+					{isMyo ? 'MYO-REP' : bucketLabel(prescription?.band)}
 				</span>
 				<span class="font-mono text-[10px] text-text-muted">
-					{exercise.sets} x {exercise.repRange}
+					{exercise.sets} sets · {prescription?.targetLow}-{prescription?.targetHigh} reps
 				</span>
 			</div>
 			<h2 class="text-xl font-bold">{exercise.name}</h2>
-
-			{#if record}
-				<div class="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-pr/10 border border-pr/20">
-					<span class="font-mono text-xs text-pr/70">{isVolume ? 'BEAT VOLUME:' : 'BEAT:'}</span>
-					<span class="font-mono text-sm font-bold text-pr">
-						{record.weight}kg x {record.reps}{isVolume ? ` = ${record.volume}` : ''}
-					</span>
-				</div>
-			{:else}
-				<div class="mt-2 font-mono text-xs text-accent/70">No record yet — set your first one.</div>
-			{/if}
-
-			{#if isVolume && suggestedLoad}
-				<div class="mt-2 font-mono text-[11px] text-success/80">
-					Suggested load ≈ {suggestedLoad}kg ({Math.round(VOLUME_LOAD_PCT * 100)}% of max), chase total reps.
-				</div>
-			{/if}
 		</div>
 
+		<!-- Today's instruction -->
+		{#if prescription}
+			<div class="mb-4 rounded-xl border border-accent/25 bg-accent/5 p-3.5">
+				<div class="flex items-baseline gap-2 mb-1">
+					<span class="font-mono text-[9px] font-bold tracking-widest text-accent">
+						{KIND_LABELS[prescription.kind] ?? 'TODAY'}
+					</span>
+					{#if prescription.heavyTest}
+						<span class="font-mono text-[9px] font-bold tracking-widest text-pr">HEAVY TEST</span>
+					{/if}
+				</div>
+				<div class="font-mono text-lg font-bold text-text mb-1.5">{prescription.headline}</div>
+				<p class="text-xs text-text-muted leading-relaxed">{prescription.reason}</p>
+			</div>
+		{/if}
+
+		<!-- Band record (only the one you're training today) -->
+		{#if bucketRecord}
+			<div class="mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-pr/10 border border-pr/20">
+				<span class="font-mono text-xs text-pr/70">{bucketLabel(bucketRecord.bucket)} BEST:</span>
+				<span class="font-mono text-sm font-bold text-pr">
+					{bucketRecord.weight}kg × {bucketRecord.totalReps ?? bucketRecord.reps}
+				</span>
+				{#if bucketRecord.legacy}
+					<span class="font-mono text-[9px] text-text-muted">(pre-bands)</span>
+				{/if}
+			</div>
+		{/if}
+
 		<!-- Input Row -->
-		<div class="flex gap-3 mb-4">
+		<div class="flex gap-3 mb-3">
 			<div class="flex-1">
 				<label for="weight-input" class="block font-mono text-[10px] text-text-muted tracking-wider mb-1.5">
 					WEIGHT (KG)
@@ -125,7 +164,7 @@
 			</div>
 			<div class="flex-1">
 				<label for="reps-input" class="block font-mono text-[10px] text-text-muted tracking-wider mb-1.5">
-					{isVolume ? 'TOTAL REPS' : 'REPS'}
+					{isMyo ? 'ACTIVATION REPS' : 'REPS'}
 				</label>
 				<input
 					id="reps-input"
@@ -136,31 +175,84 @@
 					placeholder="0"
 				/>
 			</div>
+			{#if isMyo}
+				<div class="flex-1">
+					<label for="total-input" class="block font-mono text-[10px] text-text-muted tracking-wider mb-1.5">
+						TOTAL REPS
+					</label>
+					<input
+						id="total-input"
+						type="number"
+						inputmode="numeric"
+						bind:value={totalReps}
+						class="w-full h-14 px-4 rounded-xl bg-bg-input border border-border text-xl font-mono font-bold text-center focus:outline-none focus:border-accent transition-colors"
+						placeholder="0"
+					/>
+				</div>
+			{/if}
 		</div>
 
-		<!-- Live volume / beat indicator -->
-		{#if isVolume && parseFloat(weight) > 0 && parseInt(reps) > 0}
-			<div class="mb-4 text-center font-mono text-xs {beatsRecord ? 'text-success' : 'text-text-dim'}">
-				Total volume: {parseFloat(weight) * parseInt(reps)}{beatsRecord ? ' — new best!' : ''}
-			</div>
-		{:else if !isVolume && beatsRecord && record}
-			<div class="mb-4 text-center font-mono text-xs text-success">New record!</div>
+		{#if isMyo}
+			<p class="mb-4 font-mono text-[10px] text-text-muted leading-relaxed">
+				Activation set to near failure, then mini-sets with 10-20s rest. Total = every rep including
+				the activation set.
+			</p>
 		{/if}
 
-		<!-- Save Record -->
+		<!-- Effort -->
+		<div class="mb-4">
+			<div class="font-mono text-[10px] text-text-muted tracking-wider mb-1.5">
+				HOW CLOSE TO FAILURE?
+			</div>
+			<div class="grid grid-cols-3 gap-2">
+				{#each RIR_OPTIONS as opt}
+					<button
+						onclick={() => (rir = opt.value)}
+						class="py-2.5 px-1 rounded-xl border text-center transition-all active:scale-[0.97] {rir === opt.value
+							? 'bg-accent/15 border-accent/40 text-accent'
+							: 'bg-bg-input border-border text-text-dim hover:border-border-focus'}"
+					>
+						<div class="font-mono text-[10px] font-bold tracking-wider">{opt.label}</div>
+						<div class="font-mono text-[9px] text-text-muted mt-0.5">{opt.hint}</div>
+					</button>
+				{/each}
+			</div>
+			{#if rir === null && valid}
+				<div class="mt-1.5 font-mono text-[10px] text-text-muted">
+					Needed to work out whether to add load next time.
+				</div>
+			{/if}
+		</div>
+
+		<!-- Live feedback: which band, did it hit target, is it a best -->
+		{#if valid && liveBucket}
+			<div class="mb-4 text-center font-mono text-xs">
+				<span class="text-text-dim">
+					Lands in <span class="font-bold text-text">{bucketLabel(liveBucket)}</span>
+					· {formatScore(liveBucket, liveScore)}
+				</span>
+				{#if hitTarget}
+					<span class="text-success"> · target hit</span>
+				{/if}
+				{#if beatsRecord}
+					<span class="text-pr"> · new best</span>
+				{/if}
+			</div>
+		{/if}
+
 		<button
 			onclick={handleSave}
-			class="w-full py-4 rounded-xl bg-pr/15 border border-pr/30 text-pr font-semibold text-base hover:bg-pr/25 transition-all active:scale-[0.98] mb-3"
+			disabled={!valid}
+			class="w-full py-4 rounded-xl bg-pr/15 border border-pr/30 text-pr font-semibold text-base hover:bg-pr/25 transition-all active:scale-[0.98] mb-3 disabled:opacity-40 disabled:active:scale-100"
 		>
-			Save Record
+			Log Set
 		</button>
 
-		<!-- Mark Done (no new record) -->
 		<button
-			onclick={handleMarkDone}
+			onclick={finish}
 			class="w-full py-3 rounded-xl bg-bg border border-border text-text-dim font-medium hover:text-text hover:border-border-focus transition-all active:scale-[0.98]"
 		>
-			Mark Done — didn't beat it
+			Mark done — nothing to log
 		</button>
 	</div>
 </div>
@@ -175,6 +267,9 @@
 		<div class="text-center" in:fly={{ y: 20, duration: 200 }}>
 			<div class="font-mono text-5xl font-bold text-pr drop-shadow-[0_0_30px_rgba(250,204,21,0.4)]">
 				NEW PR!
+			</div>
+			<div class="font-mono text-sm text-pr/70 mt-2 tracking-widest">
+				{bucketLabel(liveBucket)}
 			</div>
 		</div>
 	</div>

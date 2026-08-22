@@ -1,3 +1,5 @@
+import { BANDS, BAND_ORDER, classifyBand } from './bands.js';
+
 // The 5-day rolling workout program.
 //
 // Each exercise is a "slot". The top-level fields are the *primary* variant;
@@ -16,10 +18,12 @@
 //   name      display name
 //   sets      target number of working sets (guideline only)
 //   repRange  target rep range (guideline only)
-//   method    'straight' | 'myorep' | 'volume'
-//             - straight/myorep: track heaviest weight x reps (strength record)
-//             - volume: track best total volume (weight x reps); suggested load
-//               is ~60% of the lift's max (see VOLUME_LOAD_PCT in store.js)
+//   method    'straight' | 'myorep' | 'volume' (legacy field, still the source
+//             of truth in the data below). It is split at read time into:
+//               structure   'straight' | 'myorep' — how the set is performed
+//               defaultBand which rep band this slot is programmed for
+//             Rep bands are otherwise derived from the reps you actually do,
+//             never declared up front. See bands.js and docs/training-model.md.
 //   muscle    primary muscle worked (for analytics grouping)
 //   type      'upper' | 'leg' | 'abs' (for card styling)
 //   notes     form / execution cue
@@ -538,15 +542,152 @@ export const LEGACY_ID_MOVEMENTS = {
 	'machine-lateral-raise-condo': 'machine-lateral-raise'
 };
 
+// --- Movement profiles: band eligibility and load increments ---
+//
+// Heavy work (1-5 reps) is only allowed where the setup is stable and a near-
+// maximal effort does not depend on stabiliser fatigue or spinal position.
+// Everything else caps at moderate. This is a safety rule, not a preference —
+// see docs/training-model.md.
+export const HEAVY_ELIGIBLE = new Set([
+	// Pressing on a fixed or well-braced path
+	'smith-bench-press',
+	'barbell-bench-press',
+	'machine-chest-press',
+	'machine-incline-press',
+	'incline-smith-press',
+	'machine-shoulder-press',
+	'smith-shoulder-press',
+	// Supported squat patterns
+	'hack-squat',
+	'leg-press',
+	'smith-squat',
+	'pendulum-squat',
+	// Vertical pulls and chest-supported horizontal pulls
+	'neutral-pulldown',
+	'wide-pulldown',
+	'lat-pulldown',
+	'assisted-pullup',
+	'chest-supported-row',
+	'machine-row'
+]);
+
+// Smallest realistic load jump per movement, in kg. The prescription treats
+// this as a suggestion — the UI always lets you enter what was actually free.
+const BARBELL = 2.5;
+const DUMBBELL = 2.5;
+const STACK = 5;
+const PLATE = 5;
+
+export const LOAD_INCREMENTS = {
+	'barbell-bench-press': BARBELL,
+	'smith-bench-press': BARBELL,
+	'incline-smith-press': BARBELL,
+	'smith-shoulder-press': BARBELL,
+	'smith-squat': BARBELL,
+	'barbell-row': BARBELL,
+	'pendlay-row': BARBELL,
+	'rdl': BARBELL,
+	'ez-bar-curl': BARBELL,
+	'preacher-curl': BARBELL,
+	'skullcrusher': BARBELL,
+	'incline-db-press': DUMBBELL,
+	'db-shoulder-press': DUMBBELL,
+	'db-lateral-raise': DUMBBELL,
+	'db-rdl': DUMBBELL,
+	'db-step-up': DUMBBELL,
+	'bulgarian-split-squat': DUMBBELL,
+	'walking-lunge': DUMBBELL,
+	'incline-db-curl': DUMBBELL,
+	'hammer-curl': DUMBBELL,
+	'hammer-curl-combo': DUMBBELL,
+	'overhead-db-triceps': DUMBBELL,
+	'hack-squat': PLATE,
+	'leg-press': PLATE,
+	'pendulum-squat': PLATE,
+	't-bar-row': PLATE,
+	'chest-supported-row': PLATE,
+	'leg-press-calf': PLATE
+};
+
+export const DEFAULT_INCREMENT = STACK;
+
+export function incrementFor(movement) {
+	return LOAD_INCREMENTS[movement] ?? DEFAULT_INCREMENT;
+}
+
+// "8-10" / "10-12 each" -> [8, 10]. Falls back to the band default.
+export function parseRepRange(repRange) {
+	const nums = String(repRange ?? '').match(/\d+/g);
+	if (!nums || nums.length === 0) return null;
+	const lo = parseInt(nums[0], 10);
+	const hi = nums.length > 1 ? parseInt(nums[1], 10) : lo;
+	return [lo, hi];
+}
+
+// The band a slot's programmed rep range naturally sits in. Uses the midpoint
+// so a range straddling a boundary (12-15) lands where most of it sits.
+function bandForRange(range) {
+	if (!range) return 'moderate';
+	return classifyBand(Math.round((range[0] + range[1]) / 2)) ?? 'moderate';
+}
+
+// Keep a target range inside its band, so hitting the target always classifies
+// into the band it was prescribed for (12-15 in the volume band -> 13-15).
+function clampToBand(range, band) {
+	const { min, max } = BANDS[band];
+	const lo = Math.max(min, Math.min(range[0], max === Infinity ? range[0] : max));
+	const hi = Math.max(lo, Math.min(range[1], max === Infinity ? range[1] : max));
+	return [lo, hi];
+}
+
+// Band config for a slot/variant pair. `movement` decides heavy eligibility and
+// the load increment; the slot's programmed repRange decides the default band
+// and its target reps. Bands the movement is not eligible for are dropped.
+export function bandConfigFor(movement, repRange) {
+	const range = parseRepRange(repRange);
+	const preferred = bandForRange(range);
+	const eligible = BAND_ORDER.filter(
+		(b) => b !== 'heavy' || HEAVY_ELIGIBLE.has(movement)
+	);
+	const defaultBand = eligible.includes(preferred) ? preferred : 'moderate';
+
+	const targetReps = {};
+	for (const band of eligible) {
+		targetReps[band] =
+			band === defaultBand && range
+				? clampToBand(range, band)
+				: BANDS[band].defaultTarget;
+	}
+
+	return { bands: eligible, defaultBand, targetReps, increment: incrementFor(movement) };
+}
+
+// Old `method` conflated set structure with rep band. Split it:
+//   'myorep'   -> a distinct set structure
+//   'volume'   -> a straight set that happens to live in the volume band
+//   'straight' -> a straight set
+export function structureFor(method) {
+	return method === 'myorep' ? 'myorep' : 'straight';
+}
+
+// Attach the derived training model to a raw slot/variant object.
+function withTrainingModel(base) {
+	return {
+		...base,
+		structure: structureFor(base.method),
+		...bandConfigFor(base.movement, base.repRange)
+	};
+}
+
 // Flat lookup of every variant (primary + alternatives) keyed by id, with the
 // owning slot's id. Useful for analytics and resolving records to display names.
 export const exerciseIndex = (() => {
 	const index = {};
 	for (const day of program) {
 		for (const slot of day.exercises) {
-			index[slot.id] = { ...slot, slotId: slot.id, isPrimary: true };
+			index[slot.id] = withTrainingModel({ ...slot, slotId: slot.id, isPrimary: true });
 			for (const alt of slot.alternatives ?? []) {
-				index[alt.id] = {
+				index[alt.id] = withTrainingModel({
 					...alt,
 					slotId: slot.id,
 					isPrimary: false,
@@ -554,7 +695,7 @@ export const exerciseIndex = (() => {
 					type: slot.type,
 					sets: slot.sets,
 					repRange: slot.repRange
-				};
+				});
 			}
 		}
 	}
@@ -583,8 +724,11 @@ export function movementName(movement) {
 }
 
 // All variants for a slot (primary first), each normalised to a full exercise.
-export function slotVariants(slot) {
-	const primary = {
+// `custom` holds user-created variations for this slot (see customVariants in
+// store.js) — gym-specific stations like "Cable machine by the pilates room",
+// which need their own records because the load is not comparable.
+export function slotVariants(slot, custom = []) {
+	const primary = withTrainingModel({
 		id: slot.id,
 		movement: slot.movement,
 		name: slot.name,
@@ -595,18 +739,42 @@ export function slotVariants(slot) {
 		method: slot.method,
 		type: slot.type,
 		isPrimary: true
-	};
-	const alts = (slot.alternatives ?? []).map((alt) => ({
-		id: alt.id,
-		movement: alt.movement,
-		name: alt.name,
-		notes: alt.notes,
-		muscle: alt.muscle ?? slot.muscle,
-		sets: slot.sets,
-		repRange: slot.repRange,
-		method: slot.method,
-		type: slot.type,
-		isPrimary: false
-	}));
-	return [primary, ...alts];
+	});
+	const alts = (slot.alternatives ?? []).map((alt) =>
+		withTrainingModel({
+			id: alt.id,
+			movement: alt.movement,
+			name: alt.name,
+			notes: alt.notes,
+			muscle: alt.muscle ?? slot.muscle,
+			sets: slot.sets,
+			repRange: slot.repRange,
+			method: slot.method,
+			type: slot.type,
+			isPrimary: false
+		})
+	);
+	const customs = custom.map((c) =>
+		withTrainingModel({
+			id: c.id,
+			movement: c.movement,
+			name: c.name,
+			notes: c.notes ?? slot.notes,
+			muscle: c.muscle ?? slot.muscle,
+			sets: slot.sets,
+			repRange: slot.repRange,
+			method: slot.method,
+			type: slot.type,
+			isPrimary: false,
+			isCustom: true,
+			basedOn: c.basedOn ?? slot.movement
+		})
+	);
+	return [primary, ...alts, ...customs];
+}
+
+// Sibling movements for a slot — used to show a reference number when you have
+// no history on the variant you picked today.
+export function siblingMovements(slot) {
+	return [slot.movement, ...(slot.alternatives ?? []).map((a) => a.movement)];
 }
