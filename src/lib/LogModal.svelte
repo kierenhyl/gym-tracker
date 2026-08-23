@@ -2,6 +2,7 @@
 	import { updateRecords } from './store.js';
 	import { bucketLabel, classifyBand, nearestEligibleBand, scoreFor, formatScore } from './bands.js';
 	import { KIND_LABELS } from './prescribe.js';
+	import RangeTrack from './RangeTrack.svelte';
 	import { fly, fade, slide } from 'svelte/transition';
 
 	let { exercise, prescription, bucketRecords = {}, readiness, onClose, onExerciseComplete, onPR } = $props();
@@ -60,6 +61,15 @@
 
 	let shownRecord = $derived(bucketRecords[prescription?.bucket ?? exercise.defaultBand]);
 
+	// Same arrow language as the card, so the two screens read identically.
+	let dir = $derived(prescription?.direction);
+	let tone = $derived(dir?.tone ?? 'push');
+	let loadArrow = $derived(dir?.move === 'load' ? (tone === 'back-off' ? '↓' : '↑') : '');
+	let repsArrow = $derived(dir?.move === 'reps' ? '↑' : '');
+	let toneText = $derived(
+		tone === 'back-off' ? 'text-amber' : tone === 'hold' ? 'text-text-dim' : 'text-accent'
+	);
+
 	const RIR_OPTIONS = [
 		{ value: 2, label: 'HAD 2+ MORE', hint: 'left reps in the tank' },
 		{ value: 1, label: 'HAD 1 MORE', hint: 'about right' },
@@ -105,10 +115,10 @@
 
 		<div class="mb-4">
 			<div class="flex items-center gap-2 mb-1">
-				<span class="font-mono text-[10px] font-semibold tracking-widest {isMyo ? 'text-accent' : prescription?.band === 'heavy' ? 'text-pr' : 'text-text-dim'}">
+				<span class="font-mono t-meta font-semibold tracking-widest {isMyo ? 'text-accent' : prescription?.band === 'heavy' ? 'text-pr' : 'text-text-dim'}">
 					{bucketLabel(prescription?.bucket ?? exercise.defaultBand)}
 				</span>
-				<span class="font-mono text-[10px] text-text-muted">
+				<span class="font-mono t-meta text-text-muted">
 					{exercise.sets} sets · {exercise.repRange}{exercise.rir ? ` · ${exercise.rir}` : ''}
 				</span>
 			</div>
@@ -117,33 +127,49 @@
 
 		{#if prescription}
 			<div class="mb-4 rounded-xl border border-accent/25 bg-accent/5 p-3.5">
-				<div class="flex items-baseline gap-2 mb-1">
-					<span class="font-mono text-[9px] font-bold tracking-widest text-accent">{KIND_LABELS[prescription.kind] ?? 'TODAY'}</span>
-					{#if prescription.heavyTest}<span class="font-mono text-[9px] font-bold tracking-widest text-pr">HEAVY TEST</span>{/if}
+				<div class="flex items-baseline gap-2 mb-2">
+					{#if prescription.targetLoad != null}
+						<span class="t-display font-mono font-bold tabular-nums">
+							<span class={loadArrow ? toneText : 'text-text'}>{prescription.targetLoad}{loadArrow}</span><span class="t-label text-text-muted">kg</span>
+							<span class="text-text-dim font-normal"> × </span><span class={repsArrow ? toneText : 'text-text'}>{prescription.targetReps}{repsArrow}</span>
+						</span>
+					{:else}
+						<span class="t-display font-mono font-bold text-text-dim">{prescription.targetLow}–{prescription.targetHigh} reps</span>
+					{/if}
+					<span class="t-label ml-auto flex-shrink-0 {toneText}">{KIND_LABELS[prescription.kind] ?? 'today'}</span>
 				</div>
-				<div class="font-mono text-lg font-bold mb-1.5">{prescription.headline}</div>
-				<p class="text-xs text-text-muted leading-relaxed">{prescription.reason}</p>
+				{#if dir}
+					<div class="mb-2.5">
+						<RangeTrack lo={dir.reps.lo} hi={dir.reps.hi} from={dir.reps.from} to={dir.reps.to} {tone} />
+					</div>
+				{/if}
+				{#if prescription.heavyTest}
+					<div class="t-label text-pr mb-1.5">Heavy test</div>
+				{/if}
+				<p class="t-body text-text-muted">{prescription.reason}</p>
 			</div>
 		{/if}
 
 		{#if shownRecord}
-			<div class="mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-pr/10 border border-pr/20">
-				<span class="font-mono text-xs text-pr/70">{bucketLabel(shownRecord.bucket)} BEST:</span>
-				<span class="font-mono text-sm font-bold text-pr">{shownRecord.weight}kg × {shownRecord.totalReps ?? shownRecord.reps}</span>
-				{#if shownRecord.legacy}<span class="font-mono text-[9px] text-text-muted">(pre-bands)</span>{/if}
+			<!-- A resting record is reference, not an achievement. Gold is reserved
+			     for the moment one is actually set. -->
+			<div class="mb-4 t-meta text-text-muted">
+				{bucketLabel(shownRecord.bucket).toLowerCase()} best
+				<span class="text-text-dim">{shownRecord.weight}kg × {shownRecord.totalReps ?? shownRecord.reps}</span>
+				{#if shownRecord.legacy}<span> · pre-bands</span>{/if}
 			</div>
 		{/if}
 
 		<!-- Sets -->
 		<div class="space-y-2 mb-3">
-			<div class="flex items-center gap-2 font-mono text-[10px] text-text-muted tracking-wider">
+			<div class="flex items-center gap-2 font-mono t-meta text-text-muted tracking-wider">
 				<span class="w-6"></span>
 				<span class="flex-1 text-center">WEIGHT (KG)</span>
 				<span class="flex-1 text-center">{isMyo ? 'ACTIVATION' : 'REPS'}</span>
 			</div>
 			{#each rows as row, i}
 				<div class="flex items-center gap-2" transition:slide={{ duration: 120 }}>
-					<span class="w-6 font-mono text-[11px] text-text-muted text-right">{isMyo ? '·' : i + 1}</span>
+					<span class="w-6 font-mono t-meta text-text-muted text-right">{isMyo ? '·' : i + 1}</span>
 					<input type="number" inputmode="decimal" step="0.5" bind:value={row.weight} placeholder="0"
 						class="flex-1 min-w-0 h-12 px-3 rounded-xl bg-bg-input border border-border text-lg font-mono font-bold text-center focus:outline-none focus:border-accent" />
 					<input type="number" inputmode="numeric" bind:value={row.reps} placeholder="0"
@@ -153,11 +179,11 @@
 			{#if isMyo}
 				<div class="flex items-center gap-2">
 					<span class="w-6"></span>
-					<span class="flex-1 font-mono text-[10px] text-text-muted text-right pr-2">TOTAL REPS</span>
+					<span class="flex-1 font-mono t-meta text-text-muted text-right pr-2">TOTAL REPS</span>
 					<input type="number" inputmode="numeric" bind:value={totalReps} placeholder="0"
 						class="flex-1 min-w-0 h-12 px-3 rounded-xl bg-bg-input border border-border text-lg font-mono font-bold text-center focus:outline-none focus:border-accent" />
 				</div>
-				<p class="font-mono text-[10px] text-text-muted leading-relaxed pl-8">
+				<p class="font-mono t-meta text-text-muted leading-relaxed pl-8">
 					Activation set to near failure, then mini-sets with 10-20s rest. Total counts every rep.
 				</p>
 			{/if}
@@ -165,25 +191,25 @@
 
 		{#if !isMyo && plannedSets > 1}
 			<button onclick={() => (singleSet = !singleSet)}
-				class="mb-4 font-mono text-[10px] tracking-wider text-text-muted underline underline-offset-2">
+				class="mb-4 font-mono t-meta tracking-wider text-text-muted underline underline-offset-2">
 				{singleSet ? `show all ${plannedSets} sets` : 'just log one set'}
 			</button>
 		{/if}
 
 		<!-- Effort -->
 		<div class="mb-4">
-			<div class="font-mono text-[10px] text-text-muted tracking-wider mb-1.5">HOW CLOSE TO FAILURE ON YOUR HARDEST SET?</div>
+			<div class="font-mono t-meta text-text-muted tracking-wider mb-1.5">HOW CLOSE TO FAILURE ON YOUR HARDEST SET?</div>
 			<div class="grid grid-cols-3 gap-2">
 				{#each RIR_OPTIONS as opt}
 					<button onclick={() => (rir = opt.value)}
 						class="py-2.5 px-1 rounded-xl border text-center transition-all active:scale-[0.97] {rir === opt.value ? 'bg-accent/15 border-accent/40 text-accent' : 'bg-bg-input border-border text-text-dim hover:border-border-focus'}">
-						<div class="font-mono text-[10px] font-bold tracking-wider">{opt.label}</div>
-						<div class="font-mono text-[9px] text-text-muted mt-0.5">{opt.hint}</div>
+						<div class="font-mono t-meta font-bold tracking-wider">{opt.label}</div>
+						<div class="font-mono t-meta text-text-muted mt-0.5">{opt.hint}</div>
 					</button>
 				{/each}
 			</div>
 			{#if rir === null && canSave}
-				<div class="mt-1.5 font-mono text-[10px] text-text-muted">Needed to work out whether to add load next time.</div>
+				<div class="mt-1.5 font-mono t-meta text-text-muted">Needed to work out whether to add load next time.</div>
 			{/if}
 		</div>
 
@@ -198,7 +224,7 @@
 		{/if}
 
 		<button onclick={handleSave} disabled={!canSave}
-			class="w-full py-4 rounded-xl bg-pr/15 border border-pr/30 text-pr font-semibold text-base mb-3 disabled:opacity-40 transition-all active:scale-[0.98]">
+			class="w-full py-4 rounded-xl bg-accent/15 border border-accent/30 text-accent font-semibold text-base mb-3 disabled:opacity-40 transition-all active:scale-[0.98]">
 			Log {valid.length > 1 ? `${valid.length} sets` : 'set'}
 		</button>
 		<button onclick={finish} class="w-full py-3 rounded-xl bg-bg border border-border text-text-dim font-medium">

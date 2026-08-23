@@ -3,8 +3,8 @@
 	import {
 		cloudPhase, migrationAvailable, initializeCloud, signOut, downloadCloudBackup,
 		currentDay, currentDayIndex, activeSession, workoutLog, records, staleRecords,
-		recordKey, recordsFor, staleDaysFor, exerciseSelections, customVariants,
-		customVariantsFor, slotVariantsWithCustom, getActiveVariant, selectVariant,
+		recordKey, recordFor, staleDaysFor, exerciseSelections, customVariants,
+		slotVariantsWithCustom, getActiveVariant, selectVariant,
 		addCustomVariant, removeCustomVariant, markCompleted, startSession, completeSession,
 		markExerciseComplete, prescriptionFor, READINESS, READINESS_LABELS
 	} from '$lib/store.js';
@@ -17,6 +17,7 @@
 	import HistoryView from '$lib/HistoryView.svelte';
 	import AnalyticsView from '$lib/AnalyticsView.svelte';
 	import { program } from '$lib/program.js';
+	import { movementForId } from '$lib/program.js';
 	import { fly, fade } from 'svelte/transition';
 
 	let showLog = $state(false);
@@ -30,6 +31,7 @@
 	let sessionPRs = $state(0);
 	let showComplete = $state(false);
 	let pendingReadiness = $state('normal');
+	let focusedSlotId = $state(null);
 
 	onMount(() => { initializeCloud(); });
 
@@ -50,8 +52,61 @@
 		if ($migrationAvailable && !migrationDismissed) showMigration = true;
 	});
 
-	function activeVariant(slot) { return getActiveVariant(slot, $exerciseSelections, $customVariants); }
-	function variantsFor(slot) { return slotVariantsWithCustom(slot, $customVariants); }
+	// Everything the day view needs, computed once: the active variant, today's
+	// prescription, the single band record, and what was logged today.
+	let plan = $derived(
+		$currentDay.exercises.map((slot) => {
+			const exercise = getActiveVariant(slot, $exerciseSelections, $customVariants);
+			const rx = prescriptionFor($workoutLog, slot, exercise, readiness, $customVariants);
+			return {
+				slot,
+				exercise,
+				rx,
+				variants: slotVariantsWithCustom(slot, $customVariants),
+				bandRecord: recordFor($records, exercise, rx?.bucket),
+				staleDays: staleDaysFor($staleRecords, exercise, rx?.bucket),
+				loggedToday: loggedTodayFor(exercise.movement)
+			};
+		})
+	);
+
+	// The exercise you're up to: the first incomplete one, unless you tapped
+	// another to jump to it.
+	let currentSlotId = $derived.by(() => {
+		if (focusedSlotId && !completedExercises.includes(focusedSlotId)) return focusedSlotId;
+		return $currentDay.exercises.find((e) => !completedExercises.includes(e.id))?.id ?? null;
+	});
+
+	function loggedTodayFor(movement) {
+		const today = new Date().toISOString().slice(0, 10);
+		const sets = $workoutLog.filter(
+			(e) =>
+				e.weight != null &&
+				(e.movement ?? movementForId(e.exerciseId)) === movement &&
+				String(e.date).slice(0, 10) === today
+		);
+		if (!sets.length) return null;
+		return `${sets[0].weight}kg × ${sets.map((s) => s.totalReps ?? s.reps).join(',')}`;
+	}
+
+	// The shape of the day, before you start.
+	let shape = $derived.by(() => {
+		const counts = { reps: 0, load: 0, back: 0, base: 0 };
+		for (const { rx } of plan) {
+			const d = rx?.direction;
+			if (!d) continue;
+			if (d.tone === 'new' && d.move === 'none') counts.base++;
+			else if (d.move === 'reps') counts.reps++;
+			else if (d.move === 'load' && d.tone === 'back-off') counts.back++;
+			else if (d.move === 'load') counts.load++;
+		}
+		return [
+			counts.reps && `${counts.reps} rep push${counts.reps > 1 ? 'es' : ''}`,
+			counts.load && `${counts.load} load step${counts.load > 1 ? 's' : ''}`,
+			counts.back && `${counts.back} back off`,
+			counts.base && `${counts.base} baseline${counts.base > 1 ? 's' : ''}`
+		].filter(Boolean).join(' · ');
+	});
 
 	function bucketRecordsFor(variant) {
 		const out = {};
@@ -64,11 +119,12 @@
 
 	function tap(slot, variant) { selectedSlot = slot; selectedExercise = variant; showLog = true; }
 	function closeLog() { showLog = false; selectedSlot = null; selectedExercise = null; }
-	function tick(slot, variant) { markExerciseComplete(slot.id); markCompleted(slot.id, variant.id); }
+	function tick(slot, variant) { markExerciseComplete(slot.id); markCompleted(slot.id, variant.id); focusedSlotId = null; }
 
 	function finishSession() {
 		completeSession($currentDayIndex, sessionPRs, readiness);
 		sessionPRs = 0;
+		focusedSlotId = null;
 		showComplete = true;
 		setTimeout(() => { showComplete = false; }, 2500);
 	}
@@ -80,13 +136,13 @@
 	<div class="max-w-md mx-auto px-4 pb-24">
 		<header class="pt-6 pb-4">
 			<div class="flex items-start justify-between mb-3 gap-3">
-				<h1 class="font-mono text-sm font-semibold tracking-widest uppercase text-text-dim pt-1">Gym Tracker</h1>
+				<h1 class="t-label text-text-dim pt-1">Gym Tracker</h1>
 				<SyncIndicator />
 			</div>
 			<div class="flex items-center gap-1 p-1 rounded-lg bg-bg-card border border-border">
-				{#each [['workout', 'WORKOUT'], ['history', 'HISTORY'], ['stats', 'STATS']] as [key, label]}
+				{#each [['workout', 'Workout'], ['history', 'History'], ['stats', 'Stats']] as [key, label]}
 					<button onclick={() => (view = key)}
-						class="flex-1 py-1.5 rounded-md font-mono text-[11px] tracking-wider transition-colors {view === key ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-dim'}">
+						class="flex-1 py-1.5 rounded-md t-label transition-colors {view === key ? 'bg-accent/15 text-accent' : 'text-text-muted'}">
 						{label}
 					</button>
 				{/each}
@@ -99,26 +155,26 @@
 			<div in:fly={{ y: 20, duration: 200 }}>
 				<AnalyticsView />
 				<div class="mt-6 rounded-xl border border-border bg-bg-card p-3">
-					<div class="font-mono text-[10px] text-text-muted tracking-wider mb-2">YOUR DATA</div>
+					<div class="t-label text-text-muted mb-2">Your data</div>
 					<button onclick={downloadCloudBackup}
-						class="w-full py-2.5 mb-2 rounded-lg bg-bg border border-border text-text-dim font-mono text-[11px] tracking-wider hover:text-text">
-						DOWNLOAD A BACKUP
+						class="w-full py-2.5 mb-2 rounded-lg bg-bg border border-border text-text-dim t-label hover:text-text">
+						Download a backup
 					</button>
 					<button onclick={signOut}
-						class="w-full py-2.5 rounded-lg bg-bg border border-border text-text-muted font-mono text-[11px] tracking-wider hover:text-text-dim">
-						SIGN OUT
+						class="w-full py-2.5 rounded-lg bg-bg border border-border text-text-muted t-label hover:text-text-dim">
+						Sign out
 					</button>
 				</div>
 			</div>
 		{:else}
-			<div class="flex items-center justify-between mb-6" in:fly={{ y: 20, duration: 200 }}>
+			<div class="flex items-center justify-between mb-4" in:fly={{ y: 20, duration: 200 }}>
 				<button onclick={() => currentDayIndex.update((i) => (i - 1 + program.length) % program.length)}
 					aria-label="Previous day" disabled={isSessionActive}
 					class="w-10 h-10 flex items-center justify-center rounded-lg bg-bg-card border border-border text-text-dim hover:text-accent disabled:opacity-40">
 					<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
 				</button>
 				<div class="text-center">
-					<div class="font-mono text-xs text-accent font-semibold tracking-wider">DAY {$currentDay.day} OF 5</div>
+					<div class="t-label text-accent">Day {$currentDay.day} of 5</div>
 					<h2 class="text-2xl font-bold tracking-tight">{$currentDay.name}</h2>
 				</div>
 				<button onclick={() => currentDayIndex.update((i) => (i + 1) % program.length)}
@@ -128,18 +184,22 @@
 				</button>
 			</div>
 
+			{#if shape}
+				<p class="t-meta text-text-muted text-center mb-5">{shape}</p>
+			{/if}
+
 			{#if !isSessionActive}
 				<div class="mb-6">
-					<div class="font-mono text-[10px] text-text-muted tracking-wider mb-2">HOW ARE YOU FEELING TODAY?</div>
+					<div class="t-label text-text-muted mb-2">How are you feeling today?</div>
 					<div class="grid grid-cols-3 gap-2 mb-2">
 						{#each READINESS as level}
 							<button onclick={() => (pendingReadiness = level)}
-								class="py-2.5 rounded-xl border font-mono text-[11px] font-bold tracking-wider transition-all active:scale-[0.97] {pendingReadiness === level ? 'bg-accent/15 border-accent/40 text-accent' : 'bg-bg-card border-border text-text-dim'}">
+								class="py-2.5 rounded-xl border t-label font-bold transition-all active:scale-[0.97] {pendingReadiness === level ? 'bg-accent/15 border-accent/40 text-accent' : 'bg-bg-card border-border text-text-dim'}">
 								{READINESS_LABELS[level]}
 							</button>
 						{/each}
 					</div>
-					<p class="font-mono text-[10px] text-text-muted mb-3">{READINESS_BLURB[pendingReadiness]}</p>
+					<p class="t-label text-text-muted normal-case tracking-normal mb-3">{READINESS_BLURB[pendingReadiness]}</p>
 					<button onclick={() => startSession($currentDayIndex, pendingReadiness)}
 						class="w-full py-4 rounded-xl bg-accent/10 border border-accent/30 text-accent font-semibold text-lg active:scale-[0.98]">
 						Start Session
@@ -147,25 +207,27 @@
 				</div>
 			{/if}
 
-			<div class="space-y-3">
-				{#each $currentDay.exercises as slot, i (slot.id)}
-					{@const variant = activeVariant(slot)}
-					{@const rx = prescriptionFor($workoutLog, slot, variant, readiness, $customVariants)}
-					<div in:fly={{ y: 20, duration: 200, delay: i * 40 }}>
+			<div class="space-y-2">
+				{#each plan as item, i (item.slot.id)}
+					<div in:fly={{ y: 16, duration: 180, delay: i * 30 }}>
 						<ExerciseCard
-							{slot} exercise={variant}
-							variants={variantsFor(slot)}
-							bandRecords={recordsFor($records, variant)}
-							prescription={rx}
-							staleDays={staleDaysFor($staleRecords, variant, rx?.bucket)}
+							slot={item.slot}
+							exercise={item.exercise}
+							variants={item.variants}
+							bandRecord={item.bandRecord}
+							prescription={item.rx}
+							staleDays={item.staleDays}
+							loggedToday={item.loggedToday}
 							isActive={isSessionActive}
-							isCompleted={completedExercises.includes(slot.id)}
-							onTap={() => tap(slot, variant)}
-							onTick={() => tick(slot, variant)}
-							onSelectVariant={(id) => selectVariant(slot.id, id)}
-							onAddVariant={(name) => addCustomVariant(slot.id, name)}
-							onRemoveVariant={(id) => removeCustomVariant(slot.id, id)}
-							onEditHistory={() => { editHistoryExercise = variant; showEditHistory = true; }}
+							isCompleted={completedExercises.includes(item.slot.id)}
+							isCurrent={item.slot.id === currentSlotId}
+							onTap={() => tap(item.slot, item.exercise)}
+							onTick={() => tick(item.slot, item.exercise)}
+							onFocus={() => (focusedSlotId = item.slot.id)}
+							onSelectVariant={(id) => selectVariant(item.slot.id, id)}
+							onAddVariant={(name) => addCustomVariant(item.slot.id, name)}
+							onRemoveVariant={(id) => removeCustomVariant(item.slot.id, id)}
+							onEditHistory={() => { editHistoryExercise = item.exercise; showEditHistory = true; }}
 						/>
 					</div>
 				{/each}
@@ -199,7 +261,7 @@
 		bucketRecords={bucketRecordsFor(selectedExercise)}
 		{readiness}
 		onClose={closeLog}
-		onExerciseComplete={() => markExerciseComplete(selectedSlot.id)}
+		onExerciseComplete={() => { markExerciseComplete(selectedSlot.id); focusedSlotId = null; }}
 		onPR={() => sessionPRs++}
 	/>
 {/if}

@@ -93,9 +93,9 @@
 		<div class="w-10 h-1 rounded-full bg-border mx-auto mb-5"></div>
 
 		<div class="mb-4">
-			<div class="font-mono text-[10px] text-text-muted tracking-widest mb-1">RECORDS & HISTORY</div>
+			<div class="font-mono t-meta text-text-muted tracking-widest mb-1">RECORDS & HISTORY</div>
 			<h2 class="text-xl font-bold">{exercise.name}</h2>
-			<p class="font-mono text-[11px] text-text-dim mt-1 leading-relaxed">
+			<p class="font-mono t-meta text-text-dim mt-1 leading-relaxed">
 				Records are worked out from these sets, so fixing a wrong number here fixes the record.
 				Each set is filed by the reps you actually did.
 			</p>
@@ -106,11 +106,11 @@
 			<div class="mb-4 flex flex-wrap gap-1.5">
 				{#each Object.entries(bestByBucket) as [bucket, best]}
 					<div class="px-2.5 py-1.5 rounded-lg bg-pr/10 border border-pr/20">
-						<div class="font-mono text-[9px] text-pr/70 tracking-wider">{bucketLabel(bucket)}</div>
+						<div class="font-mono t-meta text-pr/70 tracking-wider">{bucketLabel(bucket)}</div>
 						<div class="font-mono text-sm font-bold text-pr">
 							{best.entry.weight}kg × {best.entry.totalReps ?? best.entry.reps}
 						</div>
-						<div class="font-mono text-[9px] text-text-muted">{formatScore(bucket, best.score)}</div>
+						<div class="font-mono t-meta text-text-muted">{formatScore(bucket, best.score)}</div>
 					</div>
 				{/each}
 			</div>
@@ -130,7 +130,7 @@
 							<div transition:slide={{ duration: 120 }}>
 								<div class="flex items-end gap-2 mb-2">
 									<div class="flex-1">
-										<label class="block font-mono text-[9px] text-text-muted tracking-wider mb-1" for="edit-w-{entry.date}">WEIGHT (KG)</label>
+										<label class="block font-mono t-meta text-text-muted tracking-wider mb-1" for="edit-w-{entry.date}">WEIGHT (KG)</label>
 										<input
 											id="edit-w-{entry.date}"
 											type="number"
@@ -141,7 +141,7 @@
 										/>
 									</div>
 									<div class="flex-1">
-										<label class="block font-mono text-[9px] text-text-muted tracking-wider mb-1" for="edit-r-{entry.date}">REPS</label>
+										<label class="block font-mono t-meta text-text-muted tracking-wider mb-1" for="edit-r-{entry.date}">REPS</label>
 										<input
 											id="edit-r-{entry.date}"
 											type="number"
@@ -169,7 +169,7 @@
 									{#each [2, 1, 0] as value}
 										<button
 											onclick={() => (editRir = value)}
-											class="flex-1 py-1.5 rounded-lg border font-mono text-[10px] font-bold tracking-wider transition-colors {editRir === value
+											class="flex-1 py-1.5 rounded-lg border font-mono t-meta font-bold tracking-wider transition-colors {editRir === value
 												? 'bg-accent/15 border-accent/40 text-accent'
 												: 'bg-bg-input border-border text-text-dim'}"
 										>
@@ -185,36 +185,36 @@
 										{entry.weight}<span class="text-xs font-normal text-text-muted">kg</span>
 										<span class="text-text-dim font-normal"> × </span>{entry.reps}
 										{#if entry.totalReps}
-											<span class="font-mono text-[11px] text-accent/80 ml-1">({entry.totalReps} total)</span>
+											<span class="font-mono t-meta text-accent/80 ml-1">({entry.totalReps} total)</span>
 										{/if}
 									</div>
 									<div class="flex items-center gap-2 flex-wrap">
-										<span class="font-mono text-[9px] tracking-wider text-text-dim">{bucketLabel(bucket)}</span>
-										<span class="font-mono text-[10px] text-text-muted">{formatDate(entry.date)}</span>
+										<span class="font-mono t-meta tracking-wider text-text-dim">{bucketLabel(bucket)}</span>
+										<span class="font-mono t-meta text-text-muted">{formatDate(entry.date)}</span>
 										{#if entry.rir != null}
-											<span class="font-mono text-[9px] text-text-muted">{RIR_SHORT[entry.rir]}</span>
+											<span class="font-mono t-meta text-text-muted">{RIR_SHORT[entry.rir]}</span>
 										{/if}
 										{#if entry.legacy}
-											<span class="font-mono text-[9px] text-text-muted">PRE-BANDS</span>
+											<span class="font-mono t-meta text-text-muted">PRE-BANDS</span>
 										{/if}
 										{#if isBest}
-											<span class="font-mono text-[9px] font-bold tracking-wider text-pr">BEST</span>
+											<span class="font-mono t-meta font-bold tracking-wider text-pr">BEST</span>
 										{/if}
 									</div>
 								</div>
 
 								<div class="flex items-center gap-1.5 flex-shrink-0">
 									{#if confirmingDelete === entry}
-										<span class="font-mono text-[10px] text-text-dim">Delete?</span>
+										<span class="font-mono t-meta text-text-dim">Delete?</span>
 										<button
 											onclick={() => removeEntry(entry)}
-											class="px-2.5 h-8 flex items-center rounded-lg bg-danger/15 border border-danger/30 text-danger font-mono text-[11px] font-semibold hover:bg-danger/25 transition-colors"
+											class="px-2.5 h-8 flex items-center rounded-lg bg-danger/15 border border-danger/30 text-danger font-mono t-meta font-semibold hover:bg-danger/25 transition-colors"
 										>
 											Yes
 										</button>
 										<button
 											onclick={() => (confirmingDelete = null)}
-											class="px-2.5 h-8 flex items-center rounded-lg bg-bg border border-border text-text-dim font-mono text-[11px] hover:text-text transition-colors"
+											class="px-2.5 h-8 flex items-center rounded-lg bg-bg border border-border text-text-dim font-mono t-meta hover:text-text transition-colors"
 										>
 											No
 										</button>

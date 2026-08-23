@@ -102,6 +102,44 @@ export function chooseBand(exercise, history, readiness = 'normal', now = Date.n
 
 // --- The prescription -----------------------------------------------------
 
+// --- Direction ---
+//
+// Which quantity should move today, and in what spirit. The UI renders the
+// arrow and the rep-range track from this rather than parsing the headline, so
+// wording and visuals can change independently.
+//
+//   move  'reps' | 'load' | 'none'  — which number carries the arrow
+//   tone  'push' | 'hold' | 'back-off' | 'new'
+const KIND_DIRECTION = {
+	establish: { move: 'none', tone: 'new' },
+	calibrate: { move: 'none', tone: 'new' },
+	'add-reps': { move: 'reps', tone: 'push' },
+	'push-harder': { move: 'reps', tone: 'push' },
+	'add-load': { move: 'load', tone: 'new' },
+	'reduce-load': { move: 'load', tone: 'back-off' },
+	deload: { move: 'load', tone: 'back-off' },
+	consolidate: { move: 'none', tone: 'hold' },
+	confirm: { move: 'none', tone: 'hold' },
+	match: { move: 'none', tone: 'hold' }
+};
+
+function directionFor(kind, { lastLoad, lastReps, targetLoad, targetReps, lo, hi }) {
+	const { move, tone } = KIND_DIRECTION[kind] ?? { move: 'none', tone: 'hold' };
+	return {
+		move,
+		tone,
+		load: { from: lastLoad ?? null, to: targetLoad ?? null, changed: move === 'load' },
+		// `from` is where the last session landed, `to` today's target: the track
+		// fills to `from` and rings `to`. A load step resets the fill to nothing.
+		reps: {
+			from: move === 'load' ? null : (lastReps ?? null),
+			to: targetReps ?? null,
+			lo,
+			hi
+		}
+	};
+}
+
 // history: every log entry for THIS variant (movement), chronological.
 // reference: optional { name, weight, reps, bucket } from a sibling movement,
 //            shown when you have no history on the station you picked today.
@@ -136,7 +174,15 @@ export function prescribe({
 			reason: reference
 				? `No history here yet. On ${reference.name} you did ${reference.weight}kg × ${reference.reps} — start near that and treat today as calibration, not a PR attempt.`
 				: 'First time on this one. Pick a load you can control for the full range and leave 1-2 reps in the tank.',
-			reference
+			reference,
+			direction: directionFor(reference ? 'calibrate' : 'establish', {
+				lastLoad: null,
+				lastReps: null,
+				targetLoad: null,
+				targetReps: lo,
+				lo,
+				hi
+			})
 		};
 	}
 
@@ -228,7 +274,17 @@ export function prescribe({
 		reason = `Heavy test — ${bandReason ?? 'time to cash in your moderate work'}. Stay strict, stop with a rep in reserve. ${reason}`;
 	}
 
-	return { ...base, kind, targetLoad, targetReps, headline, reason, last, reference };
+	return {
+		...base,
+		kind,
+		targetLoad,
+		targetReps,
+		headline,
+		reason,
+		last,
+		reference,
+		direction: directionFor(kind, { lastLoad, lastReps, targetLoad, targetReps, lo, hi })
+	};
 }
 
 export const KIND_LABELS = {

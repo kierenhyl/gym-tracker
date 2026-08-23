@@ -188,3 +188,55 @@ seed your bests but deliberately do not drive prescriptions:
 
 A wrong old record is not a blocker either: the target comes from recent work,
 and the record itself is editable from the card's BESTS panel.
+
+## Visual language
+
+The interface has one job during a session: answer "what do I do right now, and
+which way am I pushing". Everything else is one tap away.
+
+**Hierarchy.** Only the exercise being worked on is expanded; the rest collapse
+to a single fixed-height line. The instruction — load × reps — is the largest
+thing on the card. Past bests are reference: one number, low contrast, for the
+band being trained today. An earlier version showed up to three all-time bests
+in gold at the top right, which both caused ragged card heights and argued
+against the model — the whole point is to chase last session in this band, not
+an all-time PR.
+
+**The rep-range track.** A dot per rep across the target range: filled where the
+last session landed, ringed on today's target. Filling the track and watching it
+reset on a load step is double progression made visible.
+
+**Arrows.** The arrow sits on whichever quantity should move, driven by
+`prescription.direction` (`move`, `tone`, `load`, `reps`) rather than by parsing
+the headline, so wording and visuals can change independently.
+
+| `move` | `tone` | Reads as |
+|---|---|---|
+| `reps` | push | `80kg × 9↑` — hold the load, chase the rep |
+| `load` | new | `82.5↑kg × 6` — new rung, track resets |
+| `load` | back-off | `72.5↓kg × 6` — amber, ease off |
+| `none` | hold | no arrow — repeat and consolidate |
+| `none` | new | no track — find a starting load |
+
+A load step on the rep-progression-only movements resets reps sharply (20 → 12
+on a lateral raise). That must read as a promotion, not a failure: empty track
+plus copy that says so.
+
+**Colour — one meaning each.**
+
+| Colour | Means |
+|---|---|
+| accent | act on this today |
+| success | done |
+| gold | an achievement just happened — never a resting record |
+| amber | ease off |
+| dim / muted | reference only |
+
+**Type — four steps.** `t-display` 20px for instruction numbers, `t-title` 15px
+for the exercise name, `t-body` 13px for reasons and notes, `t-label` / `t-meta`
+11px for everything else. The twelve ad-hoc sizes that preceded this (including
+four near-identical micro-sizes) are gone.
+
+**Redundancy.** The band label is implied by the rep range — "MODERATE" next to
+"6-10" says nothing. A band is surfaced only when it is news: a heavy test, or a
+set landing somewhere unexpected.

@@ -64,7 +64,7 @@
 			/>
 
 			{#if tooShort}
-				<p class="font-mono text-[11px] text-text-muted mb-3">
+				<p class="font-mono t-meta text-text-muted mb-3">
 					{12 - password.length} more character{12 - password.length === 1 ? '' : 's'} needed.
 				</p>
 			{/if}

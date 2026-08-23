@@ -64,7 +64,7 @@
 				Done
 			</button>
 		{:else}
-			<div class="font-mono text-[10px] text-text-muted tracking-widest mb-1">IMPORT OLD DATA</div>
+			<div class="font-mono t-meta text-text-muted tracking-widest mb-1">IMPORT OLD DATA</div>
 			<h2 class="text-xl font-bold mb-2">Your cloud storage is empty</h2>
 			<p class="text-sm text-text-muted leading-relaxed mb-5">
 				If you tracked workouts before the move to cloud saving, bring them across now. Importing is
@@ -73,7 +73,7 @@
 
 			{#if localData && summary}
 				<div class="rounded-xl border border-border bg-bg p-3 mb-3">
-					<div class="font-mono text-[10px] text-text-muted tracking-wider mb-1">FOUND IN THIS BROWSER</div>
+					<div class="font-mono t-meta text-text-muted tracking-wider mb-1">FOUND IN THIS BROWSER</div>
 					<div class="font-mono text-sm">
 						{summary.sets} sets · {summary.sessions} sessions · {summary.completions} ticks
 					</div>
@@ -90,7 +90,7 @@
 				</button>
 			{/if}
 
-			<div class="font-mono text-[10px] text-text-muted tracking-wider mb-1.5">
+			<div class="font-mono t-meta text-text-muted tracking-wider mb-1.5">
 				OR CHOOSE A BACKUP FILE
 			</div>
 			<input
@@ -98,9 +98,9 @@
 				accept="application/json,.json"
 				onchange={onFile}
 				disabled={busy}
-				class="w-full text-sm text-text-dim file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border file:border-border file:bg-bg-input file:text-text-dim file:font-mono file:text-[11px]"
+				class="w-full text-sm text-text-dim file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border file:border-border file:bg-bg-input file:text-text-dim file:font-mono file:t-meta"
 			/>
-			<p class="font-mono text-[10px] text-text-muted mt-1.5 leading-relaxed">
+			<p class="font-mono t-meta text-text-muted mt-1.5 leading-relaxed">
 				Browser storage can't be read across different web addresses, so data from the old site has
 				to come in as a file.
 			</p>
