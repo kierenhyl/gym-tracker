@@ -1,154 +1,284 @@
 <script>
 	import { slide } from 'svelte/transition';
+	import { bucketLabel } from './bands.js';
+	import { KIND_LABELS } from './prescribe.js';
+	import RangeTrack from './RangeTrack.svelte';
 
 	let {
-		slot,
-		exercise,
-		record,
-		staleDays = 0,
-		isActive,
-		isCompleted,
-		onTap,
-		onTick,
-		onSelectVariant,
-		onEditHistory
+		slot, exercise, variants = [], bandRecord = null, prescription,
+		staleDays = 0, isActive, isCompleted, isCurrent = false, loggedToday = null,
+		suggestions = [],
+		onTap, onTick, onUndoTick, onFocus, onSelectVariant, onAddVariant, onRemoveVariant, onEditHistory
 	} = $props();
 
 	let pickerOpen = $state(false);
+	let notesOpen = $state(false);
+	let adding = $state(false);
+	let newName = $state('');
 
-	let isVolume = $derived(exercise.method === 'volume');
-	let methodLabel = $derived(
-		exercise.method === 'myorep'
-			? 'MYO-REP'
-			: exercise.method === 'volume'
-				? 'HIGH VOLUME'
-				: 'STRAIGHT'
+	// Only the exercise being worked on shows its full detail. Everything else
+	// collapses to one line, so heights stay uniform and the day stays scannable.
+	let expanded = $derived(isActive && isCurrent);
+
+	let dir = $derived(prescription?.direction);
+	let tone = $derived(dir?.tone ?? 'push');
+	let isMyo = $derived(exercise.structure === 'myorep');
+
+	// The arrow sits on whichever quantity should move.
+	let loadArrow = $derived(dir?.move === 'load' ? (tone === 'back-off' ? '↓' : '↑') : '');
+	let repsArrow = $derived(dir?.move === 'reps' ? '↑' : '');
+
+	// Weight, reps, sets — the three things worth reading at a glance. Nothing
+	// else on the card gets this size.
+	let hasLoad = $derived(prescription?.targetLoad != null);
+	let loadText = $derived(hasLoad ? `${prescription.targetLoad}${loadArrow}` : '—');
+	let repsText = $derived(
+		!hasLoad
+			? `${prescription?.targetLow}-${prescription?.targetHigh}`
+			: // On a myo set the number is the activation set; the + is the mini-sets
+				// that follow it to failure.
+				`${prescription.targetReps}${isMyo ? '+' : ''}${repsArrow}`
 	);
-	let methodChip = $derived(
-		exercise.method === 'myorep'
-			? 'text-accent bg-accent/10'
-			: exercise.method === 'volume'
-				? 'text-success bg-success/10'
-				: 'text-text-dim bg-bg-input'
+	let repsLabel = $derived(isMyo ? 'myo' : 'reps');
+	let setCount = $derived(exercise.sets ?? 1);
+
+	let loggedText = $derived(
+		loggedToday ? `${loggedToday.weight}kg × ${loggedToday.reps.join(', ')}` : ''
 	);
 
-	let hasAlternatives = $derived((slot?.alternatives?.length ?? 0) > 0);
-	let isStale = $derived(staleDays > 0);
+	// Quiet reference. Myo shows the total it produced, because that is the
+	// record — but the activation set is what we are chasing.
+	let lastText = $derived.by(() => {
+		const l = prescription?.last;
+		if (!l) return null;
+		const total = prescription.lastTotal;
+		const tail = isMyo && total > l.reps ? ` → ${total} total` : '';
+		return `last ${l.weight} × ${l.reps}${tail}`;
+	});
 
-	function pick(variantId) {
-		onSelectVariant?.(variantId);
-		pickerOpen = false;
+	let accent = $derived(
+		tone === 'back-off' ? 'text-amber' : tone === 'hold' ? 'text-text-dim' : 'text-accent'
+	);
+	let rail = $derived(
+		isCompleted ? 'border-success' : expanded ? 'border-accent' : 'border-transparent'
+	);
+
+	function pick(id) { onSelectVariant?.(id); pickerOpen = false; adding = false; }
+	function submitVariant() {
+		const n = newName.trim();
+		if (!n) return;
+		onAddVariant?.(n);
+		newName = ''; adding = false; pickerOpen = false;
 	}
 </script>
 
-<div
-	class="rounded-xl border transition-all {isCompleted
-		? 'bg-success/5 border-success/25'
-		: isActive
-			? 'bg-bg-card border-border'
-			: 'bg-bg-card/40 border-border/40'}"
->
-	<!-- Meta row -->
-	<div class="flex items-center gap-2 px-4 pt-3 pb-1.5">
-		<span class="font-mono text-[9px] font-semibold tracking-widest px-1.5 py-0.5 rounded {methodChip}">
-			{methodLabel}
-		</span>
-		<span class="font-mono text-[10px] text-text-dim">{exercise.muscle}</span>
-		<span class="font-mono text-[10px] text-text-muted">{exercise.sets}×{exercise.repRange}</span>
+<div class="rounded-xl border-l-[3px] {rail} border-y border-r transition-colors
+	{isCompleted ? 'bg-success/5 border-y-success/20 border-r-success/20'
+		: expanded ? 'bg-bg-card border-y-border border-r-border'
+		: 'bg-bg-card/40 border-y-border/40 border-r-border/40'}">
 
-		<div class="ml-auto flex items-center gap-1">
-			{#if isActive && !isCompleted}
-				{#if hasAlternatives}
-					<button
-						onclick={() => (pickerOpen = !pickerOpen)}
-						aria-label="Swap exercise"
-						class="w-7 h-7 flex items-center justify-center rounded-lg text-text-dim hover:text-accent hover:bg-accent/10 transition-colors {pickerOpen ? 'text-accent bg-accent/10' : ''}"
-					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
-					</button>
-				{/if}
-				<button
-					onclick={onTick}
-					aria-label="Mark done without a new record"
-					class="w-7 h-7 flex items-center justify-center rounded-lg text-text-dim hover:text-success hover:bg-success/10 transition-colors"
-				>
+	{#if !expanded}
+		<!-- Collapsed: one line, always the same height -->
+		<button onclick={() => onFocus?.()}
+			class="w-full flex items-center gap-3 px-3.5 py-3 text-left">
+			{#if isCompleted}
+				<svg class="w-3.5 h-3.5 text-success flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+			{:else}
+				<!-- The shape of the set: one dot for a straight set, a dot plus two
+				     smaller pips for the mini-sets that follow a myo activation set.
+				     Fixed column, so the day scans down. -->
+				<span class="flex items-center gap-[3px] flex-shrink-0 w-6" aria-hidden="true">
+					<span class="w-1.5 h-1.5 rounded-full bg-border"></span>
+					{#if isMyo}
+						<span class="w-1 h-1 rounded-full bg-border/70"></span>
+						<span class="w-1 h-1 rounded-full bg-border/70"></span>
+					{/if}
+				</span>
+				<span class="sr-only">{isMyo ? 'Myo-rep set' : 'Straight sets'}</span>
+			{/if}
+			<span class="t-title truncate {isCompleted ? 'text-text-dim' : 'text-text'}">{exercise.name}</span>
+			<span class="t-label ml-auto flex-shrink-0 {isCompleted ? 'text-success/70' : 'text-text-muted'}">
+				{loggedText}
+			</span>
+		</button>
+	{:else}
+		<!-- Current exercise -->
+		<div class="px-3.5 pt-3 pb-3.5">
+			<div class="flex items-start gap-2 mb-3">
+				<h3 class="t-title font-semibold flex-1 min-w-0">
+					{exercise.name}
+					{#if exercise.isCustom}<span class="t-label text-accent/70 ml-1">mine</span>{/if}
+				</h3>
+				<button onclick={() => (pickerOpen = !pickerOpen)} aria-label="Which station"
+					class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg text-text-muted hover:text-accent {pickerOpen ? 'text-accent' : ''}">
+					<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+				</button>
+				<button onclick={onTick} aria-label="Mark done without logging"
+					class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg text-text-muted hover:text-success">
 					<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
 				</button>
-			{:else if isCompleted}
-				<span class="font-mono text-[9px] font-semibold tracking-widest text-success">DONE</span>
-				<svg class="w-4 h-4 text-success" fill="currentColor" viewBox="0 0 20 20">
-					<path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-				</svg>
-			{/if}
-		</div>
-	</div>
+			</div>
 
-	<!-- Body: name + notes (tap to log) · record badge (tap to edit history) -->
-	<div class="flex items-start gap-3 px-4 pb-4 pt-1">
-		<button
-			onclick={onTap}
-			disabled={!isActive}
-			class="flex-1 min-w-0 text-left transition-transform {isActive ? 'active:scale-[0.99]' : 'cursor-default'}"
-		>
-			<h3 class="font-semibold text-[15px] leading-tight {isCompleted ? 'text-success/80' : ''}">
-				{exercise.name}
-			</h3>
-			<p class="text-xs text-text-muted leading-relaxed line-clamp-2 mt-1">
-				{exercise.notes}
-			</p>
-
-			{#if isStale && isActive && !isCompleted}
-				<div class="mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-pr/15 border border-pr/30">
-					<span class="text-xs">🔥</span>
-					<span class="font-mono text-[10px] font-bold text-pr tracking-wider">GO FOR IT</span>
-					<span class="font-mono text-[10px] text-pr/70">{staleDays}d since record</span>
+			{#if isCompleted}
+				<!-- Done. Show the work back, so an accidental tick is obvious and
+				     one tap from being undone. -->
+				<div class="flex items-baseline gap-2.5 mb-3">
+					{#if loggedToday}
+						<div>
+							<div class="t-display font-mono font-bold tabular-nums text-success">{loggedToday.weight}</div>
+							<div class="t-label text-text-muted">kg</div>
+						</div>
+						<span class="t-display font-mono text-text-dim/50">×</span>
+						<div>
+							<div class="t-display font-mono font-bold tabular-nums text-success">{loggedToday.reps.join(', ')}</div>
+							<div class="t-label text-text-muted">{isMyo ? 'myo' : 'reps'}</div>
+						</div>
+					{:else}
+						<div class="t-display font-mono font-bold text-text-dim">—</div>
+						<span class="t-body text-text-muted">marked done, nothing logged</span>
+					{/if}
+					<span class="t-label ml-auto flex-shrink-0 text-success">DONE</span>
 				</div>
-			{:else if isActive && !isCompleted}
-				<div class="mt-2 font-mono text-[10px] text-accent/60 tracking-wider">TAP TO LOG →</div>
-			{/if}
-		</button>
 
-		<!-- Record badge → opens edit history -->
-		<button
-			onclick={() => onEditHistory?.()}
-			aria-label="View and edit record history"
-			class="flex-shrink-0 flex flex-col items-end gap-0.5 rounded-lg border border-border/70 bg-bg/40 px-2.5 py-1.5 hover:border-border-focus hover:bg-bg-input/60 transition-colors active:scale-95"
-		>
-			<div class="flex items-center gap-1 text-text-muted">
-				<span class="font-mono text-[9px] tracking-wider">{isVolume ? 'VOL PR' : 'BEST'}</span>
-				<svg xmlns="http://www.w3.org/2000/svg" class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-			</div>
-			{#if record}
-				<div class="font-mono text-lg font-bold text-pr leading-none">{record.weight}<span class="text-[11px] font-normal text-text-muted">kg</span></div>
-				<div class="font-mono text-[11px] text-text-dim">×{record.reps}{isVolume ? ` · ${record.volume}` : ''}</div>
-			{:else}
-				<div class="font-mono text-lg font-bold text-text-muted leading-none">—</div>
-				<div class="font-mono text-[10px] text-accent/70 tracking-wider">SET FIRST</div>
-			{/if}
-		</button>
-	</div>
-
-	<!-- Variant picker -->
-	{#if pickerOpen && slot}
-		<div class="px-4 pb-4" transition:slide={{ duration: 150 }}>
-			<div class="font-mono text-[10px] text-text-muted tracking-wider mb-2">SWAP FOR — {exercise.muscle}</div>
-			<div class="space-y-1.5">
-				{#each [{ id: slot.id, name: slot.name, isPrimary: true }, ...(slot.alternatives ?? []).map((a) => ({ id: a.id, name: a.name, isPrimary: false }))] as v}
-					<button
-						onclick={() => pick(v.id)}
-						class="w-full flex items-center justify-between px-3 py-2 rounded-lg border text-left transition-colors {v.id === exercise.id
-							? 'bg-accent/10 border-accent/30 text-accent'
-							: 'bg-bg/50 border-border/50 text-text-dim hover:border-border-focus hover:text-text'}"
-					>
-						<span class="text-sm font-medium">{v.name}</span>
-						{#if v.id === exercise.id}
-							<span class="font-mono text-[10px] tracking-wider">ACTIVE</span>
-						{:else if v.isPrimary}
-							<span class="font-mono text-[10px] text-text-muted tracking-wider">DEFAULT</span>
-						{/if}
+				<div class="flex gap-1.5">
+					<button onclick={() => onUndoTick?.()}
+						class="flex-1 py-2.5 rounded-lg bg-bg border border-border text-text-dim t-label hover:text-text">
+						Undo complete
 					</button>
-				{/each}
+					<button onclick={() => onEditHistory?.()}
+						class="flex-1 py-2.5 rounded-lg bg-bg border border-border text-text-muted t-label hover:text-text-dim">
+						Edit history
+					</button>
+				</div>
+			{:else}
+			<!-- The instruction: weight, reps, sets. Nothing else at this size. -->
+			<button onclick={onTap} class="w-full text-left">
+				<div class="flex items-baseline gap-2.5 mb-3">
+					<div>
+						<div class="t-display font-mono font-bold tabular-nums {loadArrow ? accent : 'text-text'}">{loadText}</div>
+						<div class="t-label text-text-muted">kg</div>
+					</div>
+					<span class="t-display font-mono text-text-dim/50">×</span>
+					<div>
+						<div class="t-display font-mono font-bold tabular-nums {repsArrow ? accent : 'text-text'}">{repsText}</div>
+						<div class="t-label text-text-muted">{repsLabel}</div>
+					</div>
+					<span class="t-display font-mono text-text-dim/50">×</span>
+					<div>
+						<div class="t-display font-mono font-bold tabular-nums text-text-dim">{setCount}</div>
+						<div class="t-label text-text-muted">{setCount === 1 ? 'set' : 'sets'}</div>
+					</div>
+					<span class="t-label ml-auto flex-shrink-0 text-right {accent}">
+						{KIND_LABELS[prescription?.kind] ?? ''}
+					</span>
+				</div>
+
+				{#if dir}
+					<RangeTrack lo={dir.reps.lo} hi={dir.reps.hi} from={dir.reps.from} to={dir.reps.to} {tone} myo={isMyo} />
+				{/if}
+
+				<!-- Only where a bare number would be confusing on its own. -->
+				{#if prescription?.note}
+					<p class="t-meta mt-2 {tone === 'back-off' ? 'text-amber' : 'text-text-muted'}">{prescription.note}</p>
+				{/if}
+			</button>
+
+			{/if}
+
+			<!-- Reference, deliberately quiet -->
+			<div class="flex items-center gap-2 mt-2.5 pt-2.5 border-t border-border/50">
+				{#if lastText}
+					<span class="t-label text-text-muted">{lastText}</span>
+				{/if}
+				{#if prescription?.heavyTest}
+					<span class="t-label text-pr">heavy test</span>
+				{/if}
+				{#if staleDays > 0}
+					<span class="t-label text-amber">{staleDays}d since best</span>
+				{/if}
+				<button onclick={() => onEditHistory?.()}
+					class="t-label ml-auto text-text-muted hover:text-text-dim">
+					{#if bandRecord}
+						{bucketLabel(bandRecord.bucket).slice(0, 3).toLowerCase()} best {bandRecord.weight}×{bandRecord.totalReps ?? bandRecord.reps}
+					{:else}
+						no record yet
+					{/if}
+				</button>
 			</div>
+
+			<!-- How to do it, not why we picked it: the numbers are the instruction,
+			     and an explanation of them was just something else to read. -->
+			{#if exercise.notes || exercise.rir || exercise.rest}
+				<button onclick={() => (notesOpen = !notesOpen)} class="t-label text-text-muted mt-2 hover:text-text-dim">
+					{notesOpen ? '− how to do it' : '+ how to do it'}
+				</button>
+			{/if}
+			{#if notesOpen}
+				<div class="mt-1.5 space-y-1.5" transition:slide={{ duration: 120 }}>
+					{#if exercise.notes}
+						<p class="t-body text-text-muted">{exercise.notes}</p>
+					{/if}
+					<!-- The programme's own prescription: no longer on the face, but it
+					     is the only place rest and target effort are written down. -->
+					{#if exercise.rir || exercise.rest}
+						<p class="t-label text-text-muted">
+							{[exercise.rir, exercise.rest && `${exercise.rest} rest`].filter(Boolean).join(' · ')}
+						</p>
+					{/if}
+				</div>
+			{/if}
 		</div>
+
+		{#if pickerOpen && slot}
+			<div class="px-3.5 pb-3.5" transition:slide={{ duration: 150 }}>
+				<div class="t-label text-text-muted mb-2">Which station</div>
+				<div class="space-y-1.5">
+					{#each variants as v}
+						<div class="flex items-center gap-1.5">
+							<button onclick={() => pick(v.id)}
+								class="flex-1 flex items-center justify-between px-3 py-2 rounded-lg border text-left {v.id === exercise.id ? 'bg-accent/10 border-accent/30 text-accent' : 'bg-bg/50 border-border/50 text-text-dim'}">
+								<span class="t-body font-medium">{v.name}</span>
+								{#if v.id === exercise.id}<span class="t-label">active</span>
+								{:else if v.isCustom}<span class="t-label text-accent/60">mine</span>{/if}
+							</button>
+							{#if v.isCustom}
+								<button onclick={() => onRemoveVariant?.(v.id)} aria-label="Delete this variation"
+									class="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg text-text-muted hover:text-danger">
+									<svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" /></svg>
+								</button>
+							{/if}
+						</div>
+					{/each}
+				</div>
+
+				{#if suggestions.length && !adding}
+					<div class="mt-3 t-label text-text-muted mb-1.5">Suggestions — tap to add</div>
+					<div class="flex flex-wrap gap-1.5">
+						{#each suggestions as name}
+							<button onclick={() => onAddVariant?.(name)}
+								class="px-2.5 py-1.5 rounded-lg border border-dashed border-border text-text-dim t-body hover:border-accent/40 hover:text-accent">
+								+ {name}
+							</button>
+						{/each}
+					</div>
+				{/if}
+
+				{#if adding}
+					<div class="mt-2 flex gap-1.5" transition:slide={{ duration: 120 }}>
+						<!-- svelte-ignore a11y_autofocus -->
+						<input autofocus bind:value={newName} onkeydown={(e) => e.key === 'Enter' && submitVariant()}
+							placeholder="e.g. Cable machine by pilates room"
+							class="flex-1 min-w-0 h-10 px-3 rounded-lg bg-bg-input border border-border t-body focus:outline-none focus:border-accent" />
+						<button onclick={submitVariant} class="px-3 h-10 rounded-lg bg-accent/15 border border-accent/30 text-accent t-label font-bold">Add</button>
+					</div>
+					<p class="mt-1.5 t-meta text-text-muted">Gets its own records — a different station isn't the same load.</p>
+				{:else}
+					<button onclick={() => (adding = true)}
+						class="mt-2 w-full px-3 py-2 rounded-lg border border-dashed border-border text-text-muted t-body hover:border-accent/40 hover:text-accent">
+						+ Add my own variation
+					</button>
+				{/if}
+			</div>
+		{/if}
 	{/if}
 </div>

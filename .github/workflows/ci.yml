@@ -1,0 +1,29 @@
+# The only automated check in this repo. Deploys are Vercel's job, driven by
+# git: main -> production, a pull request -> a preview. There is deliberately
+# no deploy workflow here — a second deploy path is how the repo and the
+# running app drifted apart in the first place.
+name: CI
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The programme's own assertion script: no alternatives, exactly one leg
+      # exercise per day at one set.
+      - run: npm run verify:program
+
+      - run: npm run build

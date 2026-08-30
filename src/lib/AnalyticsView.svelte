@@ -11,8 +11,27 @@
 		biggestGain,
 		exerciseProgress,
 		entryKey,
-		recordLabel
+		recordLabel,
+		weeklySetsByMuscle,
+		rirDrift,
+		stalledMovements,
+		WEEKLY_SETS_MIN,
+		WEEKLY_SETS_MAX
 	} from './store.js';
+	import { bucketLabel } from './bands.js';
+
+	// --- Fatigue guardrails: the "am I overdoing it" side of the ledger ---
+	let weeklySets = $derived(
+		Object.entries(weeklySetsByMuscle($sessionHistory))
+			.map(([muscle, sets]) => ({
+				muscle,
+				sets,
+				state: sets > WEEKLY_SETS_MAX ? 'over' : sets < WEEKLY_SETS_MIN ? 'under' : 'ok'
+			}))
+			.sort((a, b) => b.sets - a.sets)
+	);
+	let drifting = $derived(rirDrift($workoutLog));
+	let stalled = $derived(stalledMovements($workoutLog).slice(0, 6));
 
 	// --- Headline stats ---
 	let streak = $derived(currentStreak($sessionHistory));
@@ -93,11 +112,11 @@
 		<!-- Headline grid -->
 		<div class="grid grid-cols-2 gap-2 mb-4">
 			<div class="rounded-xl bg-bg-card border border-border p-3">
-				<div class="font-mono text-[10px] text-text-muted tracking-wider">CURRENT STREAK</div>
+				<div class="font-mono t-meta text-text-muted tracking-wider">CURRENT STREAK</div>
 				<div class="text-2xl font-bold mt-1">{streak}<span class="text-sm font-normal text-text-dim ml-1">day{streak === 1 ? '' : 's'}</span></div>
 			</div>
 			<div class="rounded-xl bg-bg-card border border-border p-3">
-				<div class="font-mono text-[10px] text-text-muted tracking-wider">PRs THIS MONTH</div>
+				<div class="font-mono t-meta text-text-muted tracking-wider">PRs THIS MONTH</div>
 				<div class="text-2xl font-bold mt-1 text-pr">
 					{prsThis30}
 					{#if momentum !== 0}
@@ -108,25 +127,82 @@
 				</div>
 			</div>
 			<div class="rounded-xl bg-bg-card border border-border p-3">
-				<div class="font-mono text-[10px] text-text-muted tracking-wider">SESSIONS · 7D / 30D</div>
+				<div class="font-mono t-meta text-text-muted tracking-wider">SESSIONS · 7D / 30D</div>
 				<div class="text-2xl font-bold mt-1">{sessions7}<span class="text-sm font-normal text-text-dim"> / {sessions30}</span></div>
 			</div>
 			<div class="rounded-xl bg-bg-card border border-border p-3">
-				<div class="font-mono text-[10px] text-text-muted tracking-wider">TOTAL VOLUME</div>
+				<div class="font-mono t-meta text-text-muted tracking-wider">TOTAL VOLUME</div>
 				<div class="text-2xl font-bold mt-1">{fmtNum(totalVolume)}<span class="text-sm font-normal text-text-dim ml-1">kg</span></div>
 			</div>
 		</div>
 
+		<!-- Guardrails -->
+		{#if drifting || stalled.length || weeklySets.some((m) => m.state !== 'ok')}
+			<div class="rounded-xl bg-bg-card border border-border p-3 mb-4">
+				<div class="font-mono t-meta text-text-muted tracking-wider mb-2">RECOVERY CHECK</div>
+
+				{#if drifting}
+					<div class="mb-2.5 rounded-lg bg-danger/10 border border-danger/25 px-3 py-2">
+						<div class="font-mono t-meta font-bold tracking-wider text-danger mb-0.5">
+							LIVING AT FAILURE
+						</div>
+						<p class="t-meta text-text-muted leading-snug">
+							Most of your sets went to failure in each of the last couple of sessions. That is
+							accumulated fatigue, not a strength problem — take an easier week and the numbers
+							usually jump.
+						</p>
+					</div>
+				{/if}
+
+				{#if stalled.length}
+					<div class="mb-2.5">
+						<div class="font-mono t-meta text-text-dim tracking-wider mb-1.5">
+							STALLED — DELOAD PRESCRIBED
+						</div>
+						<div class="flex flex-wrap gap-1.5">
+							{#each stalled as s}
+								<span class="font-mono t-meta px-2 py-1 rounded-md bg-pr/10 border border-pr/25 text-pr/90">
+									{recordLabel(s.key)} · {s.load}kg
+								</span>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				{#if weeklySets.length}
+					<div>
+						<div class="font-mono t-meta text-text-dim tracking-wider mb-1.5">
+							HARD SETS THIS WEEK · TARGET {WEEKLY_SETS_MIN}-{WEEKLY_SETS_MAX} PER MUSCLE
+						</div>
+						<div class="space-y-1">
+							{#each weeklySets as m}
+								<div class="flex items-center gap-2">
+									<span class="font-mono t-meta text-text-muted w-20 flex-shrink-0 truncate">{m.muscle}</span>
+									<div class="flex-1 h-1.5 rounded-full bg-bg-input overflow-hidden">
+										<div
+											class="h-full rounded-full {m.state === 'over' ? 'bg-danger' : m.state === 'under' ? 'bg-text-muted' : 'bg-success'}"
+											style="width: {Math.min(100, (m.sets / WEEKLY_SETS_MAX) * 100)}%"
+										></div>
+									</div>
+									<span class="font-mono t-meta w-6 text-right {m.state === 'over' ? 'text-danger' : m.state === 'under' ? 'text-text-muted' : 'text-success'}">{m.sets}</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
 		{#if topGain}
 			<div class="rounded-xl bg-success/5 border border-success/20 p-3 mb-4">
-				<div class="font-mono text-[10px] text-success/70 tracking-wider">BIGGEST GAIN · 60D</div>
+				<div class="font-mono t-meta text-success/70 tracking-wider">BIGGEST GAIN · 60D</div>
 				<div class="flex items-baseline justify-between mt-1">
 					<div class="font-semibold text-sm">{recordLabel(topGain.key)}</div>
 					<div class="font-mono text-sm text-success">
 						+{fmtNum(topGain.gain)}kg e1RM
 					</div>
 				</div>
-				<div class="font-mono text-[11px] text-text-dim mt-0.5">
+				<div class="font-mono t-meta text-text-dim mt-0.5">
 					{fmtNum(topGain.from)} → {fmtNum(topGain.to)}kg estimated max
 				</div>
 			</div>
@@ -143,7 +219,7 @@
 					{#each stale as item}
 						<div class="flex items-center justify-between px-3 py-2 rounded-lg bg-pr/5 border border-pr/15">
 							<span class="text-sm font-medium">{item.name}</span>
-							<span class="font-mono text-[11px] text-pr/80">{item.days}d ago</span>
+							<span class="font-mono t-meta text-pr/80">{item.days}d ago</span>
 						</div>
 					{/each}
 				</div>
@@ -160,7 +236,7 @@
 						<div class="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-bg-card border border-border">
 							<div class="flex-1 min-w-0">
 								<div class="text-sm font-medium truncate">{c.name}</div>
-								<div class="font-mono text-[10px] text-text-muted">
+								<div class="font-mono t-meta text-text-muted">
 									now {fmtNum(c.points.at(-1).e1rm)}kg · {c.points.length} logs
 								</div>
 							</div>
@@ -192,7 +268,7 @@
 						<div class="flex items-center justify-between px-3 py-2 rounded-lg bg-bg-card border border-border">
 							<div>
 								<div class="text-sm font-medium">{recordLabel(pr.key)}</div>
-								<div class="font-mono text-[10px] text-text-muted">{fmtDate(pr.date)}</div>
+								<div class="font-mono t-meta text-text-muted">{fmtDate(pr.date)}</div>
 							</div>
 							<div class="font-mono text-sm font-bold text-pr">{pr.weight}kg x {pr.reps}</div>
 						</div>

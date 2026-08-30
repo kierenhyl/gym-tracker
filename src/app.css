@@ -15,8 +15,41 @@
 	--color-pr: #facc15;
 	--color-success: #4ade80;
 	--color-danger: #f87171;
+	--color-amber: #fbbf24;
 	--font-mono: 'JetBrains Mono', monospace;
 	--font-display: 'Space Grotesk', sans-serif;
+
+	/* Type scale — four steps, nothing else. Previously the UI used twelve
+	   sizes including four near-identical micro-sizes (8/9/10/11px). */
+	--text-display: 20px;   /* the instruction numbers */
+	--text-title: 15px;     /* exercise name */
+	--text-body: 13px;      /* reason, notes */
+	--text-label: 11px;     /* labels, meta, units */
+}
+
+/* Colour language — one meaning per colour.
+     accent  act on this today
+     success done
+     pr      an achievement just happened (never a resting record)
+     amber   ease off
+     dim     reference only                                            */
+
+.t-display { font-size: var(--text-display); line-height: 1.1; }
+.t-title   { font-size: var(--text-title);   line-height: 1.25; }
+.t-body    { font-size: var(--text-body);    line-height: 1.45; }
+.t-meta    {
+	font-size: var(--text-label);
+	line-height: 1.35;
+	font-family: var(--font-mono);
+	letter-spacing: 0.04em;
+}
+
+.t-label   {
+	font-size: var(--text-label);
+	line-height: 1.2;
+	font-family: var(--font-mono);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
 }
 
 html, body {
