@@ -28,6 +28,15 @@
 	let showMigration = $state(false);
 	let migrationDismissed = $state(false);
 	let view = $state('workout');
+
+	// __BUILD__ is replaced at build time — see vite.config.js.
+	const buildSha = __BUILD__.sha;
+	const buildShort = buildSha.slice(0, 7);
+	const buildDate = new Date(__BUILD__.at).toLocaleDateString('en-GB', {
+		day: 'numeric',
+		month: 'short',
+		year: 'numeric'
+	});
 	let sessionPRs = $state(0);
 	let showComplete = $state(false);
 	let pendingReadiness = $state('normal');
@@ -165,6 +174,19 @@
 						Sign out
 					</button>
 				</div>
+
+				<!-- Which build is this? Stamped at build time from Vercel's own git
+				     variables, so it cannot disagree with what is deployed. -->
+				<p class="mt-4 mb-2 text-center t-meta text-text-muted break-words">
+					built from
+					{#if buildSha}
+						<a href="https://github.com/kierenhyl/gym-tracker/commit/{buildSha}"
+							target="_blank" rel="noreferrer" class="underline underline-offset-2 hover:text-text-dim">{buildShort}</a>
+					{:else}
+						local
+					{/if}
+					· {__BUILD__.ref} · {buildDate}
+				</p>
 			</div>
 		{:else}
 			<div class="flex items-center justify-between mb-4" in:fly={{ y: 20, duration: 200 }}>
