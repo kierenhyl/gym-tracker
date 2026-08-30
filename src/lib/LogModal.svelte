@@ -3,7 +3,8 @@
 	import { bucketLabel, classifyBand, nearestEligibleBand, scoreFor, formatScore } from './bands.js';
 	import { KIND_LABELS } from './prescribe.js';
 	import RangeTrack from './RangeTrack.svelte';
-	import { fly, fade, slide } from 'svelte/transition';
+	import { fade, slide } from 'svelte/transition';
+	import Sheet from './Sheet.svelte';
 
 	let { exercise, prescription, bucketRecords = {}, readiness, onClose, onExerciseComplete, onPR } = $props();
 
@@ -128,23 +129,11 @@
 	function finish() { onExerciseComplete(); onClose(); }
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="fixed inset-0 z-40 bg-bg/90 backdrop-blur-sm" onclick={onClose} transition:fade={{ duration: 150 }}></div>
-
-<div class="fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto" transition:fly={{ y: 300, duration: 250 }}>
-	<div class="max-w-md mx-auto bg-bg-card rounded-t-2xl border-t border-x border-border p-5 pb-8">
-		<div class="w-10 h-1 rounded-full bg-border mx-auto mb-5"></div>
-
-		<div class="mb-4">
-			<div class="flex items-center gap-2 mb-1">
-				<span class="font-mono t-meta font-semibold tracking-widest {isMyo ? 'text-accent' : prescription?.band === 'heavy' ? 'text-pr' : 'text-text-dim'}">
-					{bucketLabel(prescription?.bucket ?? exercise.defaultBand)}
-				</span>
-				<span class="font-mono t-meta text-text-muted">{exercise.repRange}</span>
-			</div>
-			<h2 class="text-xl font-bold">{exercise.name}</h2>
-		</div>
+<Sheet
+	eyebrow="{bucketLabel(prescription?.bucket ?? exercise.defaultBand)} · {exercise.repRange}"
+	title={exercise.name}
+	{onClose}
+>
 
 		{#if prescription}
 			<div class="mb-4 rounded-xl border border-accent/25 bg-accent/5 p-3.5">
@@ -166,7 +155,7 @@
 					<span class="t-label ml-auto flex-shrink-0 text-right {toneText}">{KIND_LABELS[prescription.kind] ?? 'today'}</span>
 				</div>
 				{#if dir}
-					<RangeTrack lo={dir.reps.lo} hi={dir.reps.hi} from={dir.reps.from} to={dir.reps.to} {tone} />
+					<RangeTrack lo={dir.reps.lo} hi={dir.reps.hi} from={dir.reps.from} to={dir.reps.to} {tone} myo={isMyo} />
 				{/if}
 				{#if prescription.heavyTest}
 					<div class="t-label text-pr mt-2">Heavy test</div>
@@ -253,8 +242,7 @@
 		<button onclick={finish} class="w-full py-3 rounded-xl bg-bg border border-border text-text-dim font-medium">
 			Mark done — nothing to log
 		</button>
-	</div>
-</div>
+</Sheet>
 
 {#if showPRFlash}
 	<div class="fixed inset-0 z-[60] flex items-center justify-center pointer-events-none" transition:fade={{ duration: 150 }}>

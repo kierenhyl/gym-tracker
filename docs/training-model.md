@@ -239,8 +239,11 @@ KG      REPS    SETS
 ```
 
 There is no explanatory sentence under it. The numbers, the `KIND_LABELS` chip
-and the track are the instruction; `prescription.reason` moved behind a
-`+ why this` tap. A short `prescription.note` stays on the face only where a
+and the track are the instruction. `prescription.reason` is no longer rendered
+anywhere — it read like something that could go stale (it could not; it is
+recomputed from current history every render) and it was one more thing to read
+mid-set. The `+ how to do it` tap now holds the movement cue and the programme's
+own RIR and rest. `reason` remains on the prescription object, unused. A short `prescription.note` stays on the face only where a
 bare number would be confusing on its own: a back-off, a `confirm`, a first
 session, and the rep-progression-only load jump.
 
@@ -252,7 +255,21 @@ an all-time PR.
 
 **The rep-range track.** A dot per rep across the target range: filled where the
 last session landed, ringed on today's target. Filling the track and watching it
-reset on a load step is double progression made visible.
+reset on a load step is double progression made visible. A myo track ends in two
+small pips — the mini-sets after the activation set.
+
+**The set-shape mark.** Every collapsed row carries a mark in a fixed column: one
+dot for a straight set, a dot plus two smaller pips for a myo set. Twelve of the
+twenty-nine slots across the five days are myo, two to four on every day, and it
+is the distinction that changes what you do at the machine — full rest, or 15
+seconds and go again. It is a picture of the set rather than an icon to learn,
+and it matches the pips on the track.
+
+Band is deliberately *not* marked. The programme never prescribes heavy work, so
+a band label would read MODERATE on almost every row — the noise that the first
+redesign removed. The rep range on the track already separates 6-10 work from
+12-20 work, and a heavy test keeps its own gold chip because it is rare enough to
+be news.
 
 **Arrows.** The arrow sits on whichever quantity should move, driven by
 `prescription.direction` (`move`, `tone`, `load`, `reps`) rather than by parsing
@@ -289,3 +306,20 @@ four near-identical micro-sizes) are gone.
 **Redundancy.** The band label is implied by the rep range — "MODERATE" next to
 "6-10" says nothing. A band is surfaced only when it is news: a heavy test, or a
 set landing somewhere unexpected.
+
+## Sheets
+
+Every modal is one `Sheet.svelte`: capped at 85vh, with a sticky header carrying
+a 44px close button, plus Escape and backdrop-tap. They were 92vh with the only
+close button below the fold, which left an 8% strip of backdrop as the sole
+escape route — unusable one-handed between sets.
+
+## Variations
+
+`variations.js` suggests one or two alternate stations per movement, offered as
+chips in the picker. Nothing is created until you tap one, so the picker holds
+what you actually use. Each becomes a custom variant with its own movement key
+and therefore its own records — a different cable stack is a different load.
+Suggestions are never heavy-eligible: `HEAVY_ELIGIBLE` lists specific stable
+setups, and a substitution made because the gym was busy is not where you test a
+near-maximal single.

@@ -7,7 +7,8 @@
 	let {
 		slot, exercise, variants = [], bandRecord = null, prescription,
 		staleDays = 0, isActive, isCompleted, isCurrent = false, loggedToday = null,
-		onTap, onTick, onFocus, onSelectVariant, onAddVariant, onRemoveVariant, onEditHistory
+		suggestions = [],
+		onTap, onTick, onUndoTick, onFocus, onSelectVariant, onAddVariant, onRemoveVariant, onEditHistory
 	} = $props();
 
 	let pickerOpen = $state(false);
@@ -17,7 +18,7 @@
 
 	// Only the exercise being worked on shows its full detail. Everything else
 	// collapses to one line, so heights stay uniform and the day stays scannable.
-	let expanded = $derived(isActive && isCurrent && !isCompleted);
+	let expanded = $derived(isActive && isCurrent);
 
 	let dir = $derived(prescription?.direction);
 	let tone = $derived(dir?.tone ?? 'push');
@@ -40,6 +41,10 @@
 	);
 	let repsLabel = $derived(isMyo ? 'myo' : 'reps');
 	let setCount = $derived(exercise.sets ?? 1);
+
+	let loggedText = $derived(
+		loggedToday ? `${loggedToday.weight}kg × ${loggedToday.reps.join(', ')}` : ''
+	);
 
 	// Quiet reference. Myo shows the total it produced, because that is the
 	// record — but the activation set is what we are chasing.
@@ -74,16 +79,26 @@
 
 	{#if !expanded}
 		<!-- Collapsed: one line, always the same height -->
-		<button onclick={() => (isCompleted ? onEditHistory?.() : onFocus?.())}
+		<button onclick={() => onFocus?.()}
 			class="w-full flex items-center gap-3 px-3.5 py-3 text-left">
 			{#if isCompleted}
 				<svg class="w-3.5 h-3.5 text-success flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
 			{:else}
-				<span class="w-1.5 h-1.5 rounded-full bg-border flex-shrink-0"></span>
+				<!-- The shape of the set: one dot for a straight set, a dot plus two
+				     smaller pips for the mini-sets that follow a myo activation set.
+				     Fixed column, so the day scans down. -->
+				<span class="flex items-center gap-[3px] flex-shrink-0 w-6" aria-hidden="true">
+					<span class="w-1.5 h-1.5 rounded-full bg-border"></span>
+					{#if isMyo}
+						<span class="w-1 h-1 rounded-full bg-border/70"></span>
+						<span class="w-1 h-1 rounded-full bg-border/70"></span>
+					{/if}
+				</span>
+				<span class="sr-only">{isMyo ? 'Myo-rep set' : 'Straight sets'}</span>
 			{/if}
 			<span class="t-title truncate {isCompleted ? 'text-text-dim' : 'text-text'}">{exercise.name}</span>
 			<span class="t-label ml-auto flex-shrink-0 {isCompleted ? 'text-success/70' : 'text-text-muted'}">
-				{loggedToday ?? ''}
+				{loggedText}
 			</span>
 		</button>
 	{:else}
@@ -104,6 +119,38 @@
 				</button>
 			</div>
 
+			{#if isCompleted}
+				<!-- Done. Show the work back, so an accidental tick is obvious and
+				     one tap from being undone. -->
+				<div class="flex items-baseline gap-2.5 mb-3">
+					{#if loggedToday}
+						<div>
+							<div class="t-display font-mono font-bold tabular-nums text-success">{loggedToday.weight}</div>
+							<div class="t-label text-text-muted">kg</div>
+						</div>
+						<span class="t-display font-mono text-text-dim/50">×</span>
+						<div>
+							<div class="t-display font-mono font-bold tabular-nums text-success">{loggedToday.reps.join(', ')}</div>
+							<div class="t-label text-text-muted">{isMyo ? 'myo' : 'reps'}</div>
+						</div>
+					{:else}
+						<div class="t-display font-mono font-bold text-text-dim">—</div>
+						<span class="t-body text-text-muted">marked done, nothing logged</span>
+					{/if}
+					<span class="t-label ml-auto flex-shrink-0 text-success">DONE</span>
+				</div>
+
+				<div class="flex gap-1.5">
+					<button onclick={() => onUndoTick?.()}
+						class="flex-1 py-2.5 rounded-lg bg-bg border border-border text-text-dim t-label hover:text-text">
+						Undo complete
+					</button>
+					<button onclick={() => onEditHistory?.()}
+						class="flex-1 py-2.5 rounded-lg bg-bg border border-border text-text-muted t-label hover:text-text-dim">
+						Edit history
+					</button>
+				</div>
+			{:else}
 			<!-- The instruction: weight, reps, sets. Nothing else at this size. -->
 			<button onclick={onTap} class="w-full text-left">
 				<div class="flex items-baseline gap-2.5 mb-3">
@@ -127,7 +174,7 @@
 				</div>
 
 				{#if dir}
-					<RangeTrack lo={dir.reps.lo} hi={dir.reps.hi} from={dir.reps.from} to={dir.reps.to} {tone} />
+					<RangeTrack lo={dir.reps.lo} hi={dir.reps.hi} from={dir.reps.from} to={dir.reps.to} {tone} myo={isMyo} />
 				{/if}
 
 				<!-- Only where a bare number would be confusing on its own. -->
@@ -135,6 +182,8 @@
 					<p class="t-meta mt-2 {tone === 'back-off' ? 'text-amber' : 'text-text-muted'}">{prescription.note}</p>
 				{/if}
 			</button>
+
+			{/if}
 
 			<!-- Reference, deliberately quiet -->
 			<div class="flex items-center gap-2 mt-2.5 pt-2.5 border-t border-border/50">
@@ -157,18 +206,17 @@
 				</button>
 			</div>
 
-			<!-- The coaching prose lives behind a tap now: the numbers are the
-			     instruction, this is only there when you want the reasoning. -->
-			<button onclick={() => (notesOpen = !notesOpen)} class="t-label text-text-muted mt-2 hover:text-text-dim">
-				{notesOpen ? '− why this' : '+ why this'}
-			</button>
+			<!-- How to do it, not why we picked it: the numbers are the instruction,
+			     and an explanation of them was just something else to read. -->
+			{#if exercise.notes || exercise.rir || exercise.rest}
+				<button onclick={() => (notesOpen = !notesOpen)} class="t-label text-text-muted mt-2 hover:text-text-dim">
+					{notesOpen ? '− how to do it' : '+ how to do it'}
+				</button>
+			{/if}
 			{#if notesOpen}
 				<div class="mt-1.5 space-y-1.5" transition:slide={{ duration: 120 }}>
-					{#if prescription?.reason}
-						<p class="t-body text-text-muted">{prescription.reason}</p>
-					{/if}
 					{#if exercise.notes}
-						<p class="t-body text-text-dim">{exercise.notes}</p>
+						<p class="t-body text-text-muted">{exercise.notes}</p>
 					{/if}
 					<!-- The programme's own prescription: no longer on the face, but it
 					     is the only place rest and target effort are written down. -->
@@ -202,6 +250,18 @@
 						</div>
 					{/each}
 				</div>
+
+				{#if suggestions.length && !adding}
+					<div class="mt-3 t-label text-text-muted mb-1.5">Suggestions — tap to add</div>
+					<div class="flex flex-wrap gap-1.5">
+						{#each suggestions as name}
+							<button onclick={() => onAddVariant?.(name)}
+								class="px-2.5 py-1.5 rounded-lg border border-dashed border-border text-text-dim t-body hover:border-accent/40 hover:text-accent">
+								+ {name}
+							</button>
+						{/each}
+					</div>
+				{/if}
 
 				{#if adding}
 					<div class="mt-2 flex gap-1.5" transition:slide={{ duration: 120 }}>

@@ -8,7 +8,7 @@
 		downloadLegacyBackup,
 		clearLegacyData
 	} from './store.js';
-	import { fly, fade } from 'svelte/transition';
+	import Sheet from './Sheet.svelte';
 
 	let { onClose } = $props();
 
@@ -40,13 +40,7 @@
 	}
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="fixed inset-0 z-40 bg-bg/90 backdrop-blur-sm" onclick={onClose} transition:fade={{ duration: 150 }}></div>
-
-<div class="fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto" transition:fly={{ y: 300, duration: 250 }}>
-	<div class="max-w-md mx-auto bg-bg-card rounded-t-2xl border-t border-x border-border p-5 pb-8">
-		<div class="w-10 h-1 rounded-full bg-border mx-auto mb-5"></div>
+<Sheet {onClose}>
 
 		{#if done}
 			<h2 class="text-xl font-bold mb-2">Imported</h2>
@@ -113,5 +107,4 @@
 				Skip for now
 			</button>
 		{/if}
-	</div>
-</div>
+</Sheet>

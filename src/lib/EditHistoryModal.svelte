@@ -2,7 +2,8 @@
 	import { workoutLog, editLogEntry, deleteLogEntry } from './store.js';
 	import { movementForId } from './program.js';
 	import { bucketFor, bucketLabel, scoreFor, effectiveReps, formatScore } from './bands.js';
-	import { fly, fade, slide } from 'svelte/transition';
+	import { slide } from 'svelte/transition';
+	import Sheet from './Sheet.svelte';
 
 	let { exercise, onClose } = $props();
 
@@ -73,29 +74,9 @@
 	const RIR_SHORT = { 0: 'FAILURE', 1: 'RIR 1', 2: 'RIR 2+' };
 </script>
 
-<!-- Backdrop -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-	class="fixed inset-0 z-40 bg-bg/90 backdrop-blur-sm"
-	onclick={onClose}
-	in:fade={{ duration: 150 }}
-	out:fade={{ duration: 100 }}
-></div>
-
-<!-- Modal -->
-<div
-	class="fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto"
-	in:fly={{ y: 300, duration: 250, opacity: 1 }}
-	out:fly={{ y: 300, duration: 200, opacity: 1 }}
->
-	<div class="max-w-md mx-auto bg-bg-card rounded-t-2xl border-t border-x border-border p-5 pb-8">
-		<div class="w-10 h-1 rounded-full bg-border mx-auto mb-5"></div>
-
+<Sheet eyebrow="Records & history" title={exercise.name} {onClose}>
 		<div class="mb-4">
-			<div class="font-mono t-meta text-text-muted tracking-widest mb-1">RECORDS & HISTORY</div>
-			<h2 class="text-xl font-bold">{exercise.name}</h2>
-			<p class="font-mono t-meta text-text-dim mt-1 leading-relaxed">
+			<p class="font-mono t-meta text-text-dim leading-relaxed">
 				Records are worked out from these sets, so fixing a wrong number here fixes the record.
 				Each set is filed by the reps you actually did.
 			</p>
@@ -242,11 +223,4 @@
 			</div>
 		{/if}
 
-		<button
-			onclick={onClose}
-			class="w-full mt-5 py-3 rounded-xl bg-bg border border-border text-text-dim font-medium hover:text-text hover:border-border-focus transition-all active:scale-[0.98]"
-		>
-			Done
-		</button>
-	</div>
-</div>
+</Sheet>

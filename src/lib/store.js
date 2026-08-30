@@ -913,6 +913,13 @@ export function markExerciseComplete(slotId) {
 	});
 }
 
+// Ticking an exercise by accident should not cost you the rest of the session.
+export function unmarkExerciseComplete(slotId) {
+	activeSession.update(($s) =>
+		$s ? { ...$s, completedExercises: $s.completedExercises.filter((id) => id !== slotId) } : $s
+	);
+}
+
 export function completeSession(dayIndex, prCount, readiness = 'normal') {
 	sessionHistory.update(($h) => [
 		...$h,

@@ -7,7 +7,7 @@
 	// Filling the track and watching it reset on a load step is double
 	// progression made visible — the rule teaches itself.
 
-	let { lo, hi, from = null, to = null, tone = 'push', compact = false } = $props();
+	let { lo, hi, from = null, to = null, tone = 'push', compact = false, myo = false } = $props();
 
 	let reps = $derived.by(() => {
 		const a = Number(lo);
@@ -53,6 +53,15 @@
 		</div>
 
 		<span class="t-label text-text-muted tabular-nums">{hi}</span>
+
+		{#if myo}
+			<!-- Then mini-sets to failure. Same two pips as the collapsed row, so
+			     the mark and the track say the same thing. -->
+			<span class="flex items-center gap-[3px] ml-0.5" aria-hidden="true">
+				<span class="w-1 h-1 rounded-full bg-border"></span>
+				<span class="w-1 h-1 rounded-full bg-border"></span>
+			</span>
+		{/if}
 	</div>
 
 	<!-- Screen readers get the same information as the dots. -->
@@ -60,5 +69,6 @@
 		Target range {lo} to {hi} reps.
 		{#if filledTo != null}Last session {filledTo} reps.{/if}
 		{#if target != null}Today aim for {target}.{/if}
+		{#if myo}Then mini-sets to failure.{/if}
 	</span>
 {/if}

@@ -6,8 +6,9 @@
 		recordKey, recordFor, staleDaysFor, exerciseSelections, customVariants,
 		slotVariantsWithCustom, getActiveVariant, selectVariant,
 		addCustomVariant, removeCustomVariant, markCompleted, startSession, completeSession,
-		markExerciseComplete, prescriptionFor, READINESS, READINESS_LABELS
+		markExerciseComplete, unmarkExerciseComplete, prescriptionFor, READINESS, READINESS_LABELS
 	} from '$lib/store.js';
+	import { suggestionsFor } from '$lib/variations.js';
 	import AccessGate from '$lib/AccessGate.svelte';
 	import MigrationModal from '$lib/MigrationModal.svelte';
 	import SyncIndicator from '$lib/SyncIndicator.svelte';
@@ -54,6 +55,9 @@
 	};
 
 	let isSessionActive = $derived(!!$activeSession);
+	// A session belongs to the day it started on. Browsing elsewhere mid-session
+	// is just looking — the session is untouched, and this is the way back.
+	let browsingAway = $derived(isSessionActive && $activeSession.dayIndex !== $currentDayIndex);
 	let completedExercises = $derived($activeSession?.completedExercises ?? []);
 	let allDone = $derived(isSessionActive && $currentDay.exercises.every((e) => completedExercises.includes(e.id)));
 
@@ -82,7 +86,9 @@
 	// The exercise you're up to: the first incomplete one, unless you tapped
 	// another to jump to it.
 	let currentSlotId = $derived.by(() => {
-		if (focusedSlotId && !completedExercises.includes(focusedSlotId)) return focusedSlotId;
+		// A completed exercise can be focused too — tapping it should show what
+		// you logged, not hide it.
+		if (focusedSlotId) return focusedSlotId;
 		return $currentDay.exercises.find((e) => !completedExercises.includes(e.id))?.id ?? null;
 	});
 
@@ -95,7 +101,9 @@
 				String(e.date).slice(0, 10) === today
 		);
 		if (!sets.length) return null;
-		return `${sets[0].weight}kg × ${sets.map((s) => s.totalReps ?? s.reps).join(',')}`;
+		// Structured, because a completed card shows the sets back to you and
+		// the collapsed row shows a summary of the same thing.
+		return { weight: sets[0].weight, reps: sets.map((s) => s.totalReps ?? s.reps) };
 	}
 
 	// The shape of the day, before you start.
@@ -191,7 +199,7 @@
 		{:else}
 			<div class="flex items-center justify-between mb-4" in:fly={{ y: 20, duration: 200 }}>
 				<button onclick={() => currentDayIndex.update((i) => (i - 1 + program.length) % program.length)}
-					aria-label="Previous day" disabled={isSessionActive}
+					aria-label="Previous day"
 					class="w-10 h-10 flex items-center justify-center rounded-lg bg-bg-card border border-border text-text-dim hover:text-accent disabled:opacity-40">
 					<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
 				</button>
@@ -200,7 +208,7 @@
 					<h2 class="text-2xl font-bold tracking-tight">{$currentDay.name}</h2>
 				</div>
 				<button onclick={() => currentDayIndex.update((i) => (i + 1) % program.length)}
-					aria-label="Next day" disabled={isSessionActive}
+					aria-label="Next day"
 					class="w-10 h-10 flex items-center justify-center rounded-lg bg-bg-card border border-border text-text-dim hover:text-accent disabled:opacity-40">
 					<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
 				</button>
@@ -208,6 +216,17 @@
 
 			{#if shape}
 				<p class="t-meta text-text-muted text-center mb-5">{shape}</p>
+			{/if}
+
+			{#if browsingAway}
+				<button onclick={() => currentDayIndex.set($activeSession.dayIndex)}
+					class="w-full mb-6 px-3.5 py-3 rounded-xl bg-accent/10 border border-accent/30 text-left flex items-center gap-2">
+					<span class="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0"></span>
+					<span class="t-body text-accent flex-1">
+						Session running on Day {program[$activeSession.dayIndex].day} — {program[$activeSession.dayIndex].name}
+					</span>
+					<span class="t-label text-accent/70">back to it</span>
+				</button>
 			{/if}
 
 			{#if !isSessionActive}
@@ -245,6 +264,8 @@
 							isCurrent={item.slot.id === currentSlotId}
 							onTap={() => tap(item.slot, item.exercise)}
 							onTick={() => tick(item.slot, item.exercise)}
+							onUndoTick={() => unmarkExerciseComplete(item.slot.id)}
+							suggestions={suggestionsFor(item.slot.movement, item.variants)}
 							onFocus={() => (focusedSlotId = item.slot.id)}
 							onSelectVariant={(id) => selectVariant(item.slot.id, id)}
 							onAddVariant={(name) => addCustomVariant(item.slot.id, name)}
