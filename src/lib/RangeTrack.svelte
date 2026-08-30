@@ -40,7 +40,7 @@
 	<div class="flex items-center gap-2">
 		<span class="t-label text-text-muted tabular-nums">{lo}</span>
 
-		<div class="flex items-center flex-1 justify-between px-1" aria-hidden="true">
+		<div class="flex items-center flex-1 justify-center gap-2" aria-hidden="true">
 			{#each reps as rep}
 				{@const isFilled = filledTo != null && rep <= filledTo}
 				{@const isTarget = target != null && rep === target}

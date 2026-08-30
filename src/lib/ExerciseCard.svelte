@@ -21,10 +21,35 @@
 
 	let dir = $derived(prescription?.direction);
 	let tone = $derived(dir?.tone ?? 'push');
+	let isMyo = $derived(exercise.structure === 'myorep');
 
 	// The arrow sits on whichever quantity should move.
 	let loadArrow = $derived(dir?.move === 'load' ? (tone === 'back-off' ? '↓' : '↑') : '');
 	let repsArrow = $derived(dir?.move === 'reps' ? '↑' : '');
+
+	// Weight, reps, sets — the three things worth reading at a glance. Nothing
+	// else on the card gets this size.
+	let hasLoad = $derived(prescription?.targetLoad != null);
+	let loadText = $derived(hasLoad ? `${prescription.targetLoad}${loadArrow}` : '—');
+	let repsText = $derived(
+		!hasLoad
+			? `${prescription?.targetLow}-${prescription?.targetHigh}`
+			: // On a myo set the number is the activation set; the + is the mini-sets
+				// that follow it to failure.
+				`${prescription.targetReps}${isMyo ? '+' : ''}${repsArrow}`
+	);
+	let repsLabel = $derived(isMyo ? 'myo' : 'reps');
+	let setCount = $derived(exercise.sets ?? 1);
+
+	// Quiet reference. Myo shows the total it produced, because that is the
+	// record — but the activation set is what we are chasing.
+	let lastText = $derived.by(() => {
+		const l = prescription?.last;
+		if (!l) return null;
+		const total = prescription.lastTotal;
+		const tail = isMyo && total > l.reps ? ` → ${total} total` : '';
+		return `last ${l.weight} × ${l.reps}${tail}`;
+	});
 
 	let accent = $derived(
 		tone === 'back-off' ? 'text-amber' : tone === 'hold' ? 'text-text-dim' : 'text-accent'
@@ -79,18 +104,24 @@
 				</button>
 			</div>
 
-			<!-- The instruction: the one thing that matters -->
+			<!-- The instruction: weight, reps, sets. Nothing else at this size. -->
 			<button onclick={onTap} class="w-full text-left">
-				<div class="flex items-baseline gap-2 mb-2.5">
-					{#if prescription?.targetLoad != null}
-						<span class="t-display font-mono font-bold tabular-nums">
-							<span class={loadArrow ? accent : 'text-text'}>{prescription.targetLoad}{loadArrow}</span><span class="t-label text-text-muted">kg</span>
-							<span class="text-text-dim font-normal"> × </span><span class={repsArrow ? accent : 'text-text'}>{prescription.targetReps}{repsArrow}</span>
-						</span>
-					{:else}
-						<span class="t-display font-mono font-bold text-text-dim">{prescription?.targetLow}–{prescription?.targetHigh} reps</span>
-					{/if}
-					<span class="t-label ml-auto flex-shrink-0 {accent}">
+				<div class="flex items-baseline gap-2.5 mb-3">
+					<div>
+						<div class="t-display font-mono font-bold tabular-nums {loadArrow ? accent : 'text-text'}">{loadText}</div>
+						<div class="t-label text-text-muted">kg</div>
+					</div>
+					<span class="t-display font-mono text-text-dim/50">×</span>
+					<div>
+						<div class="t-display font-mono font-bold tabular-nums {repsArrow ? accent : 'text-text'}">{repsText}</div>
+						<div class="t-label text-text-muted">{repsLabel}</div>
+					</div>
+					<span class="t-display font-mono text-text-dim/50">×</span>
+					<div>
+						<div class="t-display font-mono font-bold tabular-nums text-text-dim">{setCount}</div>
+						<div class="t-label text-text-muted">{setCount === 1 ? 'set' : 'sets'}</div>
+					</div>
+					<span class="t-label ml-auto flex-shrink-0 text-right {accent}">
 						{KIND_LABELS[prescription?.kind] ?? ''}
 					</span>
 				</div>
@@ -99,14 +130,17 @@
 					<RangeTrack lo={dir.reps.lo} hi={dir.reps.hi} from={dir.reps.from} to={dir.reps.to} {tone} />
 				{/if}
 
-				<p class="t-body text-text-muted mt-2.5 line-clamp-2">{prescription?.reason}</p>
+				<!-- Only where a bare number would be confusing on its own. -->
+				{#if prescription?.note}
+					<p class="t-meta mt-2 {tone === 'back-off' ? 'text-amber' : 'text-text-muted'}">{prescription.note}</p>
+				{/if}
 			</button>
 
 			<!-- Reference, deliberately quiet -->
 			<div class="flex items-center gap-2 mt-2.5 pt-2.5 border-t border-border/50">
-				<span class="t-label text-text-muted">
-					{exercise.sets} sets{exercise.rir ? ` · ${exercise.rir}` : ''}
-				</span>
+				{#if lastText}
+					<span class="t-label text-text-muted">{lastText}</span>
+				{/if}
 				{#if prescription?.heavyTest}
 					<span class="t-label text-pr">heavy test</span>
 				{/if}
@@ -123,13 +157,27 @@
 				</button>
 			</div>
 
-			{#if exercise.notes}
-				<button onclick={() => (notesOpen = !notesOpen)} class="t-label text-text-muted mt-2 hover:text-text-dim">
-					{notesOpen ? '− how to do it' : '+ how to do it'}
-				</button>
-				{#if notesOpen}
-					<p class="t-body text-text-muted mt-1.5" transition:slide={{ duration: 120 }}>{exercise.notes}</p>
-				{/if}
+			<!-- The coaching prose lives behind a tap now: the numbers are the
+			     instruction, this is only there when you want the reasoning. -->
+			<button onclick={() => (notesOpen = !notesOpen)} class="t-label text-text-muted mt-2 hover:text-text-dim">
+				{notesOpen ? '− why this' : '+ why this'}
+			</button>
+			{#if notesOpen}
+				<div class="mt-1.5 space-y-1.5" transition:slide={{ duration: 120 }}>
+					{#if prescription?.reason}
+						<p class="t-body text-text-muted">{prescription.reason}</p>
+					{/if}
+					{#if exercise.notes}
+						<p class="t-body text-text-dim">{exercise.notes}</p>
+					{/if}
+					<!-- The programme's own prescription: no longer on the face, but it
+					     is the only place rest and target effort are written down. -->
+					{#if exercise.rir || exercise.rest}
+						<p class="t-label text-text-muted">
+							{[exercise.rir, exercise.rest && `${exercise.rest} rest`].filter(Boolean).join(' · ')}
+						</p>
+					{/if}
+				</div>
 			{/if}
 		</div>
 
@@ -163,7 +211,7 @@
 							class="flex-1 min-w-0 h-10 px-3 rounded-lg bg-bg-input border border-border t-body focus:outline-none focus:border-accent" />
 						<button onclick={submitVariant} class="px-3 h-10 rounded-lg bg-accent/15 border border-accent/30 text-accent t-label font-bold">Add</button>
 					</div>
-					<p class="mt-1.5 t-label text-text-muted normal-case tracking-normal">Gets its own records — a different station isn't the same load.</p>
+					<p class="mt-1.5 t-meta text-text-muted">Gets its own records — a different station isn't the same load.</p>
 				{:else}
 					<button onclick={() => (adding = true)}
 						class="mt-2 w-full px-3 py-2 rounded-lg border border-dashed border-border text-text-muted t-body hover:border-accent/40 hover:text-accent">

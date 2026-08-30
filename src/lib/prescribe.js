@@ -105,7 +105,7 @@ export function chooseBand(exercise, history, readiness = 'normal', now = Date.n
 // --- Direction ---
 //
 // Which quantity should move today, and in what spirit. The UI renders the
-// arrow and the rep-range track from this rather than parsing the headline, so
+// arrow and the rep-range track from these fields rather than from any wording, so
 // wording and visuals can change independently.
 //
 //   move  'reps' | 'load' | 'none'  — which number carries the arrow
@@ -170,10 +170,14 @@ export function prescribe({
 			kind: reference ? 'calibrate' : 'establish',
 			targetLoad: null,
 			targetReps: lo,
-			headline: `Find a load for ${lo}-${hi} reps`,
+			note: reference
+				? `start near ${reference.weight}kg — today is calibration`
+				: 'pick a load you can control for the full range',
 			reason: reference
 				? `No history here yet. On ${reference.name} you did ${reference.weight}kg × ${reference.reps} — start near that and treat today as calibration, not a PR attempt.`
 				: 'First time on this one. Pick a load you can control for the full range and leave 1-2 reps in the tank.',
+			last: null,
+			lastTotal: null,
 			reference,
 			direction: directionFor(reference ? 'calibrate' : 'establish', {
 				lastLoad: null,
@@ -192,39 +196,36 @@ export function prescribe({
 	const rir = last.rir ?? null;
 	const stalled = isStalled(sessions);
 
-	let kind, targetLoad, targetReps, headline, reason;
+	let kind, targetLoad, targetReps, note, reason;
 
 	if (stalled) {
 		kind = 'deload';
 		targetLoad = roundLoad(lastLoad * DELOAD_PCT);
 		targetReps = lo;
-		headline = `${targetLoad}kg × ${lo}`;
+		note = `3 sessions stuck at ${lastLoad}kg`;
 		reason = `Three sessions with no gain at ${lastLoad}kg. Back off about 10% today, rebuild from there — grinding a stall just banks fatigue.`;
 	} else if (lastReps < lo) {
 		if (rir === 0) {
 			kind = 'reduce-load';
 			targetLoad = roundLoad(lastLoad * REDUCE_PCT);
 			targetReps = lo;
-			headline = `${targetLoad}kg × ${lo}`;
+			note = `${lastLoad}kg is too heavy to grow on`;
 			reason = `Last time ${lastLoad}kg × ${lastReps} to failure — under the ${lo}-${hi} range. The load is too heavy to grow on. Drop it and earn the reps.`;
 		} else {
 			kind = 'push-harder';
 			targetLoad = lastLoad;
 			targetReps = lo;
-			headline = `${lastLoad}kg × ${lo}`;
 			reason = `Last time ${lastLoad}kg × ${lastReps} with reps left over. Same load — get to ${lo} and take it closer to failure.`;
 		}
 	} else if (lastReps < hi) {
 		kind = 'add-reps';
 		targetLoad = lastLoad;
 		targetReps = lastReps + 1;
-		headline = isMyo
-			? `${lastLoad}kg — beat ${lastTotal} total`
-			: `${lastLoad}kg × ${lastReps + 1}`;
+		// Myo progresses on the activation set, not the total. Chasing the total
+		// rewards holding back on the first set to earn more mini-sets, which is
+		// backwards. The total is still the record — see docs/training-model.md.
 		reason = isMyo
-			? lastTotal > lastReps
-				? `Last time ${lastLoad}kg, ${lastReps} on the activation set for ${lastTotal} reps total. Hold the load and beat the total. At ${hi} on the activation set we add weight.`
-				: `Last time ${lastLoad}kg × ${lastReps}. Hold the load and beat that on total reps. At ${hi} on the activation set we add weight.`
+			? `Hold ${lastLoad}kg and beat ${lastReps} on the activation set. At ${hi} there we add ${increment}kg. Total reps is your volume record, not the target.`
 			: `Last time ${lastLoad}kg × ${lastReps}. One more rep. Top of the range is ${hi}, then we add ${increment}kg.`;
 	} else {
 		const prev = sessions[sessions.length - 2];
@@ -234,13 +235,12 @@ export function prescribe({
 			kind = 'confirm';
 			targetLoad = lastLoad;
 			targetReps = lastReps;
-			headline = `${lastLoad}kg × ${lastReps}`;
+			note = 'no effort recorded last time — repeat it';
 			reason = `Last time ${lastLoad}kg × ${lastReps}, but no effort was recorded against it. Repeat it and tell me how close to failure you got — then I know whether to add ${increment}kg.`;
 		} else if (rir === 0 && !alreadyConsolidated) {
 			kind = 'consolidate';
 			targetLoad = lastLoad;
 			targetReps = hi;
-			headline = `${lastLoad}kg × ${hi}`;
 			reason = `You hit the top of the range but had nothing left. Repeat ${lastLoad}kg once to own it, then we add ${increment}kg.`;
 		} else if (exercise.repProgressionOnly) {
 			// The smallest available step here is 30-50% of the working load, so
@@ -249,13 +249,12 @@ export function prescribe({
 			targetLoad = roundLoad(lastLoad + increment);
 			const jump = Math.round((increment / lastLoad) * 100);
 			targetReps = lo;
-			headline = `${targetLoad}kg × ${lo}+`;
+			note = `+${increment}kg is a ${jump}% jump — reps will drop`;
 			reason = `You owned ${lastReps} at ${lastLoad}kg. The smallest step up is ${increment}kg, which is a ${jump}% jump on a movement this size — expect reps to drop well below ${lastReps}, maybe to ${lo}. That is normal here, not a regression. Build back up on reps.`;
 		} else {
 			kind = 'add-load';
 			targetLoad = roundLoad(lastLoad + increment);
 			targetReps = lo;
-			headline = `${targetLoad}kg × ${lo}`;
 			reason = `You topped the range at ${lastLoad}kg. Add ${increment}kg and drop back to ${lo} reps — or the nearest load you can actually get on.`;
 		}
 	}
@@ -266,7 +265,7 @@ export function prescribe({
 		kind = 'match';
 		targetLoad = lastLoad;
 		targetReps = lastReps;
-		headline = `${lastLoad}kg × ${lastReps}`;
+		note = 'rough day — match it, do not chase it';
 		reason = `You flagged a rough day. Match last session rather than chasing it — a maintained session beats a bad one you have to recover from.`;
 	}
 
@@ -279,9 +278,10 @@ export function prescribe({
 		kind,
 		targetLoad,
 		targetReps,
-		headline,
+		note: note ?? null,
 		reason,
 		last,
+		lastTotal,
 		reference,
 		direction: directionFor(kind, { lastLoad, lastReps, targetLoad, targetReps, lo, hi })
 	};

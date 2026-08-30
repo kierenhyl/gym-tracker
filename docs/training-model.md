@@ -67,8 +67,25 @@ sets and `myo` for myo-reps. Ranking within a bucket:
 Not a band — a set structure, usually sitting in the moderate-to-high rep
 range. Comparing `weight × reps` to a straight set is meaningless, so myo-reps
 get their own track per movement. They record an activation set to near
-failure plus mini-sets with 10–20s rest. Progression is on **total effective
-reps at a load**; the activation set gates when load goes up.
+failure plus mini-sets with 10–20s rest.
+
+**Progression is on the activation set; the total is the record.** These are
+two different jobs and they were previously muddled — the card targeted the
+activation set, promised to beat the total, and drew its track over the
+activation range. One number now does each job:
+
+- **Activation reps** are what you chase, and what gates the load step. Reach
+  the top of the range on the activation set and the weight goes up.
+- **Total reps** (activation + mini-sets) is scored as tonnage and holds the
+  record for the movement. It is displayed, never targeted.
+
+Chasing the total would reward holding back on the activation set to earn more
+mini-sets, which is exactly backwards. The mini-sets self-terminate; the
+activation set is the part you actually control.
+
+On the card this is one number with a `+`: `55kg × 12+ × 2` — twelve on the
+activation set, then mini-sets until you cannot, twice. The reference line
+carries the total: `last 55 × 11 → 23 total`.
 
 ## Band eligibility is a safety rule
 
@@ -124,6 +141,22 @@ smallest increment and drop back to the bottom.
 
 A load jump needs to know how hard the last set was. Adding a rep at the same
 load is safe without that; adding weight is not — hence the `confirm` case.
+
+### Effort is only asked for when it changes the answer
+
+Read the table above and the RIR column is blank — "any" — for every row where
+the reps land *inside* the range. The engine reads `rir` in exactly two places:
+below the range, and at or above the top of it. So those are the only two times
+the log screen asks.
+
+Land mid-range and the question does not appear at all; most sessions never see
+it. When it does appear, its appearing is the signal that this one matters, so
+it needs no explanatory copy beneath it.
+
+The check runs across every set in the group, not just the best one: sets in a
+group can land in different bands, and each band keeps its own history, so a set
+that is mid-range for today's prescription may be top-of-range for the band it
+actually lands in.
 
 ### Choosing the band
 
@@ -195,8 +228,23 @@ The interface has one job during a session: answer "what do I do right now, and
 which way am I pushing". Everything else is one tap away.
 
 **Hierarchy.** Only the exercise being worked on is expanded; the rest collapse
-to a single fixed-height line. The instruction — load × reps — is the largest
-thing on the card. Past bests are reference: one number, low contrast, for the
+to a single fixed-height line. The instruction is a row of three values at
+`t-display` — **load × reps × sets** — and nothing else on the card is that
+size. Sets is the same size but dim, because it never moves; the two numbers
+that do move carry the colour and the arrow.
+
+```
+80  ×   9↑  ×   3
+KG      REPS    SETS
+```
+
+There is no explanatory sentence under it. The numbers, the `KIND_LABELS` chip
+and the track are the instruction; `prescription.reason` moved behind a
+`+ why this` tap. A short `prescription.note` stays on the face only where a
+bare number would be confusing on its own: a back-off, a `confirm`, a first
+session, and the rep-progression-only load jump.
+
+Past bests are reference: one number, low contrast, for the
 band being trained today. An earlier version showed up to three all-time bests
 in gold at the top right, which both caused ragged card heights and argued
 against the model — the whole point is to chase last session in this band, not
@@ -208,7 +256,8 @@ reset on a load step is double progression made visible.
 
 **Arrows.** The arrow sits on whichever quantity should move, driven by
 `prescription.direction` (`move`, `tone`, `load`, `reps`) rather than by parsing
-the headline, so wording and visuals can change independently.
+any wording, so copy and visuals can change independently. There is no
+`headline` field — the UI composes the hero row from the structured values.
 
 | `move` | `tone` | Reads as |
 |---|---|---|

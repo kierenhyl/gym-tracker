@@ -61,7 +61,8 @@
 
 	let shownRecord = $derived(bucketRecords[prescription?.bucket ?? exercise.defaultBand]);
 
-	// Same arrow language as the card, so the two screens read identically.
+	// Same hero row and arrow language as the card, so the two screens read
+	// identically.
 	let dir = $derived(prescription?.direction);
 	let tone = $derived(dir?.tone ?? 'push');
 	let loadArrow = $derived(dir?.move === 'load' ? (tone === 'back-off' ? '↓' : '↑') : '');
@@ -70,10 +71,32 @@
 		tone === 'back-off' ? 'text-amber' : tone === 'hold' ? 'text-text-dim' : 'text-accent'
 	);
 
+	let hasLoad = $derived(prescription?.targetLoad != null);
+	let loadText = $derived(hasLoad ? `${prescription.targetLoad}${loadArrow}` : '—');
+	let repsText = $derived(
+		!hasLoad
+			? `${prescription?.targetLow}-${prescription?.targetHigh}`
+			: `${prescription.targetReps}${isMyo ? '+' : ''}${repsArrow}`
+	);
+
+	// Effort only changes what happens next when the reps land at an edge of the
+	// range: under it (drop the load, or push harder?) or at the top of it (add
+	// load, or own it first?). Mid-range the engine never reads it — see the
+	// branches in prescribe.js — so we do not ask.
+	//
+	// Tested across every set, not just the best one: sets in a group can land in
+	// different bands, and each band keeps its own history. A set that is
+	// mid-range here may be top-of-range for the band it actually lands in.
+	let needsEffort = $derived(
+		valid.length > 0 &&
+			(prescription == null ||
+				valid.some((s) => s.reps < prescription.targetLow || s.reps >= prescription.targetHigh))
+	);
+
 	const RIR_OPTIONS = [
-		{ value: 2, label: 'HAD 2+ MORE', hint: 'left reps in the tank' },
-		{ value: 1, label: 'HAD 1 MORE', hint: 'about right' },
-		{ value: 0, label: 'NOTHING LEFT', hint: 'went to failure' }
+		{ value: 2, label: 'HAD 2+ MORE' },
+		{ value: 1, label: 'HAD 1 MORE' },
+		{ value: 0, label: 'NOTHING LEFT' }
 	];
 
 	function handleSave() {
@@ -84,7 +107,7 @@
 		// whichever set later counts as the performance then carries it.
 		updateRecords(
 			exercise.id,
-			valid.map((s) => ({ ...s, rir, totalReps: isMyo ? tr : null })),
+			valid.map((s) => ({ ...s, rir: needsEffort ? rir : null, totalReps: isMyo ? tr : null })),
 			{
 				readiness,
 				movement: exercise.movement,
@@ -118,35 +141,39 @@
 				<span class="font-mono t-meta font-semibold tracking-widest {isMyo ? 'text-accent' : prescription?.band === 'heavy' ? 'text-pr' : 'text-text-dim'}">
 					{bucketLabel(prescription?.bucket ?? exercise.defaultBand)}
 				</span>
-				<span class="font-mono t-meta text-text-muted">
-					{exercise.sets} sets · {exercise.repRange}{exercise.rir ? ` · ${exercise.rir}` : ''}
-				</span>
+				<span class="font-mono t-meta text-text-muted">{exercise.repRange}</span>
 			</div>
 			<h2 class="text-xl font-bold">{exercise.name}</h2>
 		</div>
 
 		{#if prescription}
 			<div class="mb-4 rounded-xl border border-accent/25 bg-accent/5 p-3.5">
-				<div class="flex items-baseline gap-2 mb-2">
-					{#if prescription.targetLoad != null}
-						<span class="t-display font-mono font-bold tabular-nums">
-							<span class={loadArrow ? toneText : 'text-text'}>{prescription.targetLoad}{loadArrow}</span><span class="t-label text-text-muted">kg</span>
-							<span class="text-text-dim font-normal"> × </span><span class={repsArrow ? toneText : 'text-text'}>{prescription.targetReps}{repsArrow}</span>
-						</span>
-					{:else}
-						<span class="t-display font-mono font-bold text-text-dim">{prescription.targetLow}–{prescription.targetHigh} reps</span>
-					{/if}
-					<span class="t-label ml-auto flex-shrink-0 {toneText}">{KIND_LABELS[prescription.kind] ?? 'today'}</span>
+				<div class="flex items-baseline gap-2.5 mb-3">
+					<div>
+						<div class="t-display font-mono font-bold tabular-nums {loadArrow ? toneText : 'text-text'}">{loadText}</div>
+						<div class="t-label text-text-muted">kg</div>
+					</div>
+					<span class="t-display font-mono text-text-dim/50">×</span>
+					<div>
+						<div class="t-display font-mono font-bold tabular-nums {repsArrow ? toneText : 'text-text'}">{repsText}</div>
+						<div class="t-label text-text-muted">{isMyo ? 'myo' : 'reps'}</div>
+					</div>
+					<span class="t-display font-mono text-text-dim/50">×</span>
+					<div>
+						<div class="t-display font-mono font-bold tabular-nums text-text-dim">{plannedSets}</div>
+						<div class="t-label text-text-muted">{plannedSets === 1 ? 'set' : 'sets'}</div>
+					</div>
+					<span class="t-label ml-auto flex-shrink-0 text-right {toneText}">{KIND_LABELS[prescription.kind] ?? 'today'}</span>
 				</div>
 				{#if dir}
-					<div class="mb-2.5">
-						<RangeTrack lo={dir.reps.lo} hi={dir.reps.hi} from={dir.reps.from} to={dir.reps.to} {tone} />
-					</div>
+					<RangeTrack lo={dir.reps.lo} hi={dir.reps.hi} from={dir.reps.from} to={dir.reps.to} {tone} />
 				{/if}
 				{#if prescription.heavyTest}
-					<div class="t-label text-pr mb-1.5">Heavy test</div>
+					<div class="t-label text-pr mt-2">Heavy test</div>
 				{/if}
-				<p class="t-body text-text-muted">{prescription.reason}</p>
+				{#if prescription.note}
+					<p class="t-meta mt-2 {tone === 'back-off' ? 'text-amber' : 'text-text-muted'}">{prescription.note}</p>
+				{/if}
 			</div>
 		{/if}
 
@@ -183,9 +210,6 @@
 					<input type="number" inputmode="numeric" bind:value={totalReps} placeholder="0"
 						class="flex-1 min-w-0 h-12 px-3 rounded-xl bg-bg-input border border-border text-lg font-mono font-bold text-center focus:outline-none focus:border-accent" />
 				</div>
-				<p class="font-mono t-meta text-text-muted leading-relaxed pl-8">
-					Activation set to near failure, then mini-sets with 10-20s rest. Total counts every rep.
-				</p>
 			{/if}
 		</div>
 
@@ -196,22 +220,21 @@
 			</button>
 		{/if}
 
-		<!-- Effort -->
-		<div class="mb-4">
-			<div class="font-mono t-meta text-text-muted tracking-wider mb-1.5">HOW CLOSE TO FAILURE ON YOUR HARDEST SET?</div>
-			<div class="grid grid-cols-3 gap-2">
-				{#each RIR_OPTIONS as opt}
-					<button onclick={() => (rir = opt.value)}
-						class="py-2.5 px-1 rounded-xl border text-center transition-all active:scale-[0.97] {rir === opt.value ? 'bg-accent/15 border-accent/40 text-accent' : 'bg-bg-input border-border text-text-dim hover:border-border-focus'}">
-						<div class="font-mono t-meta font-bold tracking-wider">{opt.label}</div>
-						<div class="font-mono t-meta text-text-muted mt-0.5">{opt.hint}</div>
-					</button>
-				{/each}
+		<!-- Effort. Shown only when the answer changes the next prescription; its
+		     appearing at all is the signal that this one matters. -->
+		{#if needsEffort}
+			<div class="mb-4" transition:slide={{ duration: 150 }}>
+				<div class="font-mono t-meta text-text-muted tracking-wider mb-1.5">HOW CLOSE TO FAILURE?</div>
+				<div class="grid grid-cols-3 gap-2">
+					{#each RIR_OPTIONS as opt}
+						<button onclick={() => (rir = opt.value)}
+							class="py-3 px-1 rounded-xl border text-center transition-all active:scale-[0.97] {rir === opt.value ? 'bg-accent/15 border-accent/40 text-accent' : 'bg-bg-input border-border text-text-dim hover:border-border-focus'}">
+							<div class="font-mono t-meta font-bold tracking-wider">{opt.label}</div>
+						</button>
+					{/each}
+				</div>
 			</div>
-			{#if rir === null && canSave}
-				<div class="mt-1.5 font-mono t-meta text-text-muted">Needed to work out whether to add load next time.</div>
-			{/if}
-		</div>
+		{/if}
 
 		{#if bestOfEntry}
 			<div class="mb-4 text-center font-mono text-xs">
