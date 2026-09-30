@@ -1,10 +1,14 @@
 // Fixed five-workout rolling programme. There is intentionally no exercise
 // switching in this release: every slot is the researched primary movement.
 // Warm-up sets are not included in `sets`.
+//
+// `sets` × `repRange` is the total-rep range the exercise targets. You reach
+// the total in as many sets as it takes, up to MAX_SETS (bands.js), every set
+// to failure.
 
-const compound = { method: 'straight', rir: '1–3 RIR', rest: '2–3 min' };
-const isolation = { method: 'myorep', rir: '0–2 RIR', rest: '60–120 sec' };
-const core = { method: 'straight', rir: '1–3 RIR', rest: '60–120 sec' };
+const compound = { effort: 'every set to failure', rest: '2–3 min' };
+const isolation = { effort: 'every set to failure', rest: '60–120 sec' };
+const core = { effort: 'every set to failure', rest: '60–120 sec' };
 
 export const program = [
 	{
@@ -15,7 +19,7 @@ export const program = [
 			{ id: 'smith-bench', movement: 'smith-bench-press', name: 'Smith Machine Bench Press', sets: 3, repRange: '6-10', ...compound, muscle: 'Chest', type: 'upper', notes: 'Elbows about 45°. Use a controlled, pain-free range and stop before technique breaks.' },
 			{ id: 'cable-lateral-raise', movement: 'cable-lateral-raise', name: 'Cable Lateral Raise', sets: 3, repRange: '12-20', ...isolation, muscle: 'Side Delts', type: 'upper', notes: 'Start cross-body, lead with the elbow and keep momentum out of the movement.' },
 			{ id: 'overhead-cable-tri', movement: 'overhead-cable-triceps', name: 'Overhead Cable Triceps Extension', sets: 2, repRange: '10-15', ...isolation, muscle: 'Triceps', type: 'upper', notes: 'Use a comfortable stretched position and keep the ribs down.' },
-			{ id: 'hack-squat', movement: 'hack-squat', name: 'Hack Squat', sets: 1, repRange: '6-10', ...compound, muscle: 'Quads', type: 'leg', notes: 'Warm up first, then do one hard work set at a stable, pain-free depth.' },
+			{ id: 'hack-squat', movement: 'hack-squat', name: 'Hack Squat', sets: 3, repRange: '6-10', ...compound, muscle: 'Quads', type: 'leg', notes: 'Warm up first, then work at a stable, pain-free depth.' },
 			{ id: 'cable-crunch', movement: 'cable-crunch', name: 'Cable Crunch', sets: 2, repRange: '10-15', ...core, muscle: 'Abs', type: 'abs', notes: 'Bring the ribs toward the hips without pulling the rope with the arms.' }
 		]
 	},
@@ -28,7 +32,7 @@ export const program = [
 			{ id: 'neutral-pulldown', movement: 'neutral-pulldown', name: 'Neutral-Grip Lat Pulldown', sets: 3, repRange: '8-12', ...compound, muscle: 'Back', type: 'upper', notes: 'Pull the elbows down toward the ribs with a comfortable grip.' },
 			{ id: 'reverse-pec-deck', movement: 'reverse-pec-deck', name: 'Reverse Pec Deck', sets: 3, repRange: '12-20', ...isolation, muscle: 'Rear Delts', type: 'upper', notes: 'Keep the chest on the pad and avoid shrugging.' },
 			{ id: 'bayesian-curl', movement: 'bayesian-curl', name: 'Bayesian Cable Curl', sets: 3, repRange: '10-15', ...isolation, muscle: 'Biceps', type: 'upper', notes: 'Keep the arm behind the torso and control the full range.' },
-			{ id: 'seated-ham-curl', movement: 'seated-ham-curl', name: 'Seated Hamstring Curl', sets: 1, repRange: '8-15', ...compound, muscle: 'Hamstrings', type: 'leg', notes: 'Warm up first, then control one hard set through the lengthened position.' }
+			{ id: 'seated-ham-curl', movement: 'seated-ham-curl', name: 'Seated Hamstring Curl', sets: 3, repRange: '8-15', ...compound, muscle: 'Hamstrings', type: 'leg', notes: 'Warm up first, then control every rep through the lengthened position.' }
 		]
 	},
 	{
@@ -40,7 +44,7 @@ export const program = [
 			{ id: 'machine-incline-press', movement: 'machine-incline-press', name: 'Machine Incline Press', sets: 3, repRange: '8-12', ...compound, muscle: 'Chest', type: 'upper', notes: 'Use a low incline where possible and keep the shoulders controlled.' },
 			{ id: 'cable-lateral-raise-d3', movement: 'cable-lateral-raise', name: 'Cable Lateral Raise', sets: 3, repRange: '12-20', ...isolation, muscle: 'Side Delts', type: 'upper', notes: 'Keep every rep strict and smooth.' },
 			{ id: 'triceps-pushdown-d3', movement: 'triceps-pushdown', name: 'Rope Triceps Pushdown', sets: 2, repRange: '10-15', ...isolation, muscle: 'Triceps', type: 'upper', notes: 'Keep the elbows pinned and finish each rep under control.' },
-			{ id: 'machine-hip-thrust', movement: 'machine-hip-thrust', name: 'Machine Hip Thrust', sets: 1, repRange: '8-12', ...compound, muscle: 'Glutes', type: 'leg', notes: 'Warm up first; finish the work set with ribs down and the pelvis neutral.' },
+			{ id: 'machine-hip-thrust', movement: 'machine-hip-thrust', name: 'Machine Hip Thrust', sets: 3, repRange: '8-12', ...compound, muscle: 'Glutes', type: 'leg', notes: 'Warm up first; finish every rep with ribs down and the pelvis neutral.' },
 			{ id: 'pallof-press', movement: 'pallof-press', name: 'Pallof Press', sets: 2, repRange: '10-15 each side', ...core, muscle: 'Core', type: 'abs', notes: 'Resist rotation and keep the pelvis and ribs stacked.' }
 		]
 	},
@@ -54,7 +58,7 @@ export const program = [
 			{ id: 'reverse-cable-crossover', movement: 'reverse-cable-crossover', name: 'Reverse Cable Crossover', sets: 3, repRange: '12-20', ...isolation, muscle: 'Rear Delts', type: 'upper', notes: 'Use a load that keeps the traps from taking over.' },
 			{ id: 'incline-db-curl', movement: 'incline-db-curl', name: 'Incline Dumbbell Curl', sets: 3, repRange: '10-15', ...isolation, muscle: 'Biceps', type: 'upper', notes: 'Control the stretched position and stop if the elbows dislike the range.' },
 			{ id: 'overhead-db-tri', movement: 'overhead-db-triceps', name: 'Overhead Dumbbell Triceps Extension', sets: 2, repRange: '10-15', ...isolation, muscle: 'Triceps', type: 'upper', notes: 'Use a pain-free depth and keep the ribs down.' },
-			{ id: 'leg-extension', movement: 'leg-extension', name: 'Leg Extension', sets: 1, repRange: '10-15', ...compound, muscle: 'Quads', type: 'leg', notes: 'Warm up first, then use a smooth, pain-free range and controlled lowering.' }
+			{ id: 'leg-extension', movement: 'leg-extension', name: 'Leg Extension', sets: 3, repRange: '10-15', ...compound, muscle: 'Quads', type: 'leg', notes: 'Warm up first, then use a smooth, pain-free range and controlled lowering.' }
 		]
 	},
 	{
@@ -67,7 +71,7 @@ export const program = [
 			{ id: 'pec-deck-d5', movement: 'pec-deck', name: 'Pec Deck', sets: 2, repRange: '12-20', ...isolation, muscle: 'Chest', type: 'upper', notes: 'Use a comfortable stretch with the shoulders controlled against the pad.' },
 			{ id: 'hammer-curl', movement: 'hammer-curl', name: 'Hammer Curl', sets: 2, repRange: '10-15', ...isolation, muscle: 'Biceps', type: 'upper', notes: 'Keep a neutral grip and avoid swinging.' },
 			{ id: 'triceps-pushdown-d5', movement: 'triceps-pushdown', name: 'Rope Triceps Pushdown', sets: 2, repRange: '10-15', ...isolation, muscle: 'Triceps', type: 'upper', notes: 'Keep the elbows pinned and lock out without losing shoulder position.' },
-			{ id: 'standing-calf-raise', movement: 'standing-calf-raise', name: 'Standing Calf Raise', sets: 1, repRange: '8-15', ...compound, muscle: 'Calves', type: 'leg', notes: 'Warm up first, then pause in the bottom stretch during the work set.' },
+			{ id: 'standing-calf-raise', movement: 'standing-calf-raise', name: 'Standing Calf Raise', sets: 3, repRange: '8-15', ...compound, muscle: 'Calves', type: 'leg', notes: 'Warm up first, then pause in the bottom stretch on every rep.' },
 			{ id: 'ab-crunch-d5', movement: 'ab-crunch', name: 'Ab Crunch Machine', sets: 2, repRange: '10-15', ...core, muscle: 'Abs', type: 'abs', notes: 'Use controlled trunk flexion without swinging.' }
 		]
 	}
@@ -172,11 +176,10 @@ export const exerciseIndex = (() => {
 					...alt,
 					slotId: slot.id,
 					isPrimary: false,
-					method: slot.method,
 					type: slot.type,
 					sets: slot.sets,
 					repRange: slot.repRange,
-					rir: slot.rir,
+					effort: slot.effort,
 					rest: slot.rest
 				};
 			}
@@ -208,9 +211,8 @@ export function slotVariants(slot) {
 		...alt,
 		sets: slot.sets,
 		repRange: slot.repRange,
-		method: slot.method,
 		type: slot.type,
-		rir: slot.rir,
+		effort: slot.effort,
 		rest: slot.rest,
 		isPrimary: false
 	}));

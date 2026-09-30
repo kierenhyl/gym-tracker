@@ -2,8 +2,8 @@
 	import { onMount } from 'svelte';
 	import {
 		cloudPhase, migrationAvailable, initializeCloud, signOut, downloadCloudBackup,
-		currentDay, currentDayIndex, activeSession, workoutLog, records, staleRecords,
-		recordKey, recordFor, staleDaysFor, exerciseSelections, customVariants,
+		currentDay, currentDayIndex, activeSession, sessions, records, recordFor,
+		historyForMovement, bandChoices, exerciseSelections, customVariants,
 		slotVariantsWithCustom, getActiveVariant, selectVariant,
 		addCustomVariant, removeCustomVariant, markCompleted, startSession, completeSession,
 		markExerciseComplete, unmarkExerciseComplete, prescriptionFor, READINESS, READINESS_LABELS
@@ -18,7 +18,6 @@
 	import HistoryView from '$lib/HistoryView.svelte';
 	import AnalyticsView from '$lib/AnalyticsView.svelte';
 	import { program } from '$lib/program.js';
-	import { movementForId } from '$lib/program.js';
 	import { fly, fade } from 'svelte/transition';
 
 	let showLog = $state(false);
@@ -42,11 +41,14 @@
 	let showComplete = $state(false);
 	let pendingReadiness = $state('normal');
 	let focusedSlotId = $state(null);
+	// The band picked on each card, for today only. Unpicked, a card uses the
+	// band its programmed range sits in.
+	let bandPick = $state({});
 
 	onMount(() => { initializeCloud(); });
 
-	// Readiness scales the day's instructions: a rough day never programmes a
-	// heavy test and downgrades progression to matching the last session.
+	// Readiness scales the day's instructions: a rough day downgrades
+	// progression to matching the last session.
 	let readiness = $derived($activeSession?.readiness ?? 'normal');
 	const READINESS_BLURB = {
 		low: "Slept badly, sore, stressed — match, don't chase",
@@ -65,19 +67,18 @@
 		if ($migrationAvailable && !migrationDismissed) showMigration = true;
 	});
 
-	// Everything the day view needs, computed once: the active variant, today's
-	// prescription, the single band record, and what was logged today.
+	// Everything the day view needs, computed once: the active variant, the
+	// band chips, today's prescription, and what was logged today.
 	let plan = $derived(
 		$currentDay.exercises.map((slot) => {
 			const exercise = getActiveVariant(slot, $exerciseSelections, $customVariants);
-			const rx = prescriptionFor($workoutLog, slot, exercise, readiness, $customVariants);
+			const rx = prescriptionFor($sessions, slot, exercise, bandPick[slot.id], readiness, $customVariants);
 			return {
 				slot,
 				exercise,
 				rx,
+				choices: bandChoices($sessions, exercise),
 				variants: slotVariantsWithCustom(slot, $customVariants),
-				bandRecord: recordFor($records, exercise, rx?.bucket),
-				staleDays: staleDaysFor($staleRecords, exercise, rx?.bucket),
 				loggedToday: loggedTodayFor(exercise.movement)
 			};
 		})
@@ -94,16 +95,7 @@
 
 	function loggedTodayFor(movement) {
 		const today = new Date().toISOString().slice(0, 10);
-		const sets = $workoutLog.filter(
-			(e) =>
-				e.weight != null &&
-				(e.movement ?? movementForId(e.exerciseId)) === movement &&
-				String(e.date).slice(0, 10) === today
-		);
-		if (!sets.length) return null;
-		// Structured, because a completed card shows the sets back to you and
-		// the collapsed row shows a summary of the same thing.
-		return { weight: sets[0].weight, reps: sets.map((s) => s.totalReps ?? s.reps) };
+		return $sessions.findLast((s) => s.movement === movement && String(s.date).slice(0, 10) === today) ?? null;
 	}
 
 	// The shape of the day, before you start.
@@ -125,14 +117,8 @@
 		].filter(Boolean).join(' · ');
 	});
 
-	function bucketRecordsFor(variant) {
-		const out = {};
-		for (const bucket of ['heavy', 'moderate', 'volume', 'myo']) {
-			const rec = $records[recordKey(variant.movement, bucket)];
-			if (rec) out[bucket] = rec;
-		}
-		return out;
-	}
+	// The log sheet works from the prescription the card showed, band included.
+	let selectedRx = $derived(plan.find((p) => p.slot.id === selectedSlot?.id)?.rx ?? null);
 
 	function tap(slot, variant) { selectedSlot = slot; selectedExercise = variant; showLog = true; }
 	function closeLog() { showLog = false; selectedSlot = null; selectedExercise = null; }
@@ -255,9 +241,8 @@
 							slot={item.slot}
 							exercise={item.exercise}
 							variants={item.variants}
-							bandRecord={item.bandRecord}
+							choices={item.choices}
 							prescription={item.rx}
-							staleDays={item.staleDays}
 							loggedToday={item.loggedToday}
 							isActive={isSessionActive}
 							isCompleted={completedExercises.includes(item.slot.id)}
@@ -267,6 +252,7 @@
 							onUndoTick={() => unmarkExerciseComplete(item.slot.id)}
 							suggestions={suggestionsFor(item.slot.movement, item.variants)}
 							onFocus={() => (focusedSlotId = item.slot.id)}
+							onSelectBand={(band) => (bandPick = { ...bandPick, [item.slot.id]: band })}
 							onSelectVariant={(id) => selectVariant(item.slot.id, id)}
 							onAddVariant={(name) => addCustomVariant(item.slot.id, name)}
 							onRemoveVariant={(id) => removeCustomVariant(item.slot.id, id)}
@@ -300,8 +286,9 @@
 {#if showLog && selectedExercise}
 	<LogModal
 		exercise={selectedExercise}
-		prescription={prescriptionFor($workoutLog, selectedSlot, selectedExercise, readiness, $customVariants)}
-		bucketRecords={bucketRecordsFor(selectedExercise)}
+		prescription={selectedRx}
+		sessions={historyForMovement($sessions, selectedExercise.movement)}
+		record={recordFor($records, selectedExercise, selectedRx?.band)}
 		{readiness}
 		onClose={closeLog}
 		onExerciseComplete={() => { markExerciseComplete(selectedSlot.id); focusedSlotId = null; }}

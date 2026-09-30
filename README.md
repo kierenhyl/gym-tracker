@@ -93,11 +93,13 @@ There is no deploy workflow in this repo, on purpose.
 | `src/lib/program.js` | the five-day programme — edit exercises here |
 | `src/lib/store.js` | state, cloud sync, records |
 | `src/lib/prescribe.js` | what to do today, and why |
-| `src/lib/bands.js` | rep bands and scoring |
-| `src/lib/training.js` | per-movement rules: heavy eligibility, increments |
+| `src/lib/bands.js` | rep bands, the set cap, and scoring |
+| `src/lib/sessions.js` | one row per session, converting set-by-set history |
+| `src/lib/training.js` | per-movement rules: low-rep eligibility, total-rep ranges |
 | `src/routes/api/` | state, setup, login, logout |
 | `docs/training-model.md` | the coaching model: bands, progression, what the interface means |
 | `docs/recovery-note.md` | what was recovered from the Vercel dashboard vs rewritten |
 
 Changing `program.js` means re-running `npm run verify:program`; it asserts
-things the app depends on, like exactly one leg exercise per day at one set.
+things the app depends on, like exactly one leg exercise per day, and checks
+the progression rules against worked examples.

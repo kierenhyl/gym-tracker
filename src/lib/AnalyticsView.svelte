@@ -1,6 +1,7 @@
 <script>
 	import {
 		workoutLog,
+		sessions,
 		sessionHistory,
 		staleRecords,
 		recentPRs,
@@ -10,15 +11,13 @@
 		totalVolumeLifted,
 		biggestGain,
 		exerciseProgress,
-		entryKey,
+		recordKey,
 		recordLabel,
 		weeklySetsByMuscle,
-		rirDrift,
 		stalledMovements,
 		WEEKLY_SETS_MIN,
 		WEEKLY_SETS_MAX
 	} from './store.js';
-	import { bucketLabel } from './bands.js';
 
 	// --- Fatigue guardrails: the "am I overdoing it" side of the ledger ---
 	let weeklySets = $derived(
@@ -30,8 +29,7 @@
 			}))
 			.sort((a, b) => b.sets - a.sets)
 	);
-	let drifting = $derived(rirDrift($workoutLog));
-	let stalled = $derived(stalledMovements($workoutLog).slice(0, 6));
+	let stalled = $derived(stalledMovements($sessions).slice(0, 6));
 
 	// --- Headline stats ---
 	let streak = $derived(currentStreak($sessionHistory));
@@ -41,15 +39,15 @@
 	let totalVolume = $derived(totalVolumeLifted($workoutLog));
 
 	// --- Momentum: PRs last 30 vs prior 30 ---
-	let prsThis30 = $derived(countPRsInWindow($workoutLog, 30, 0));
-	let prsPrev30 = $derived(countPRsInWindow($workoutLog, 60, 30));
+	let prsThis30 = $derived(countPRsInWindow($sessions, 30, 0));
+	let prsPrev30 = $derived(countPRsInWindow($sessions, 60, 30));
 	let momentum = $derived(prsThis30 - prsPrev30);
 
 	// --- Biggest recent gain ---
-	let topGain = $derived(biggestGain($workoutLog, 60));
+	let topGain = $derived(biggestGain($sessions, 60));
 
 	// --- Recent PRs feed ---
-	let recent = $derived(recentPRs($workoutLog, 30).slice(0, 6));
+	let recent = $derived(recentPRs($sessions, 30).slice(0, 6));
 
 	// --- Stale "GO FOR IT" list ---
 	let stale = $derived(
@@ -59,12 +57,14 @@
 			.slice(0, 8)
 	);
 
-	// --- Per-record e1RM progression (records with >= 2 logs) ---
+	// --- Working weight per movement and band (2+ sessions) ---
+	// The weight only goes up when a range is topped, so its line is the
+	// cleanest picture of progress. Reps inside a rung show in the "now" line.
 	let charts = $derived.by(() => {
-		const keys = [...new Set($workoutLog.filter((e) => e.weight != null).map(entryKey))];
+		const keys = [...new Set($sessions.map((s) => recordKey(s.movement, s.band)))];
 		return keys
 			.map((key) => {
-				const points = exerciseProgress($workoutLog, key);
+				const points = exerciseProgress($sessions, key);
 				return { key, name: recordLabel(key), points };
 			})
 			.filter((c) => c.points.length >= 2)
@@ -73,7 +73,7 @@
 	});
 
 	function sparkline(points, w = 120, h = 30) {
-		const vals = points.map((p) => p.e1rm);
+		const vals = points.map((p) => p.weight);
 		const min = Math.min(...vals);
 		const max = Math.max(...vals);
 		const range = max - min || 1;
@@ -84,8 +84,8 @@
 	}
 
 	function trendPct(points) {
-		const first = points[0].e1rm;
-		const last = points.at(-1).e1rm;
+		const first = points[0].weight;
+		const last = points.at(-1).weight;
 		if (!first) return 0;
 		return Math.round(((last - first) / first) * 100);
 	}
@@ -137,22 +137,9 @@
 		</div>
 
 		<!-- Guardrails -->
-		{#if drifting || stalled.length || weeklySets.some((m) => m.state !== 'ok')}
+		{#if stalled.length || weeklySets.some((m) => m.state !== 'ok')}
 			<div class="rounded-xl bg-bg-card border border-border p-3 mb-4">
 				<div class="font-mono t-meta text-text-muted tracking-wider mb-2">RECOVERY CHECK</div>
-
-				{#if drifting}
-					<div class="mb-2.5 rounded-lg bg-danger/10 border border-danger/25 px-3 py-2">
-						<div class="font-mono t-meta font-bold tracking-wider text-danger mb-0.5">
-							LIVING AT FAILURE
-						</div>
-						<p class="t-meta text-text-muted leading-snug">
-							Most of your sets went to failure in each of the last couple of sessions. That is
-							accumulated fatigue, not a strength problem — take an easier week and the numbers
-							usually jump.
-						</p>
-					</div>
-				{/if}
 
 				{#if stalled.length}
 					<div class="mb-2.5">
@@ -199,11 +186,11 @@
 				<div class="flex items-baseline justify-between mt-1">
 					<div class="font-semibold text-sm">{recordLabel(topGain.key)}</div>
 					<div class="font-mono text-sm text-success">
-						+{fmtNum(topGain.gain)}kg e1RM
+						+{topGain.gain}kg
 					</div>
 				</div>
 				<div class="font-mono t-meta text-text-dim mt-0.5">
-					{fmtNum(topGain.from)} → {fmtNum(topGain.to)}kg estimated max
+					{topGain.from} → {topGain.to}kg working weight
 				</div>
 			</div>
 		{/if}
@@ -229,7 +216,7 @@
 		<!-- Progression charts -->
 		{#if charts.length > 0}
 			<div class="mb-5">
-				<h3 class="font-mono text-xs text-text-dim tracking-wider mb-2">PROGRESSION · estimated 1RM</h3>
+				<h3 class="font-mono text-xs text-text-dim tracking-wider mb-2">PROGRESSION · working weight</h3>
 				<div class="space-y-2">
 					{#each charts as c}
 						{@const pct = trendPct(c.points)}
@@ -237,7 +224,7 @@
 							<div class="flex-1 min-w-0">
 								<div class="text-sm font-medium truncate">{c.name}</div>
 								<div class="font-mono t-meta text-text-muted">
-									now {fmtNum(c.points.at(-1).e1rm)}kg · {c.points.length} logs
+									now {c.points.at(-1).weight}kg × {c.points.at(-1).total} · {c.points.length} sessions
 								</div>
 							</div>
 							<svg viewBox="0 0 120 30" class="w-[120px] h-[30px] flex-shrink-0 overflow-visible" preserveAspectRatio="none">
@@ -270,7 +257,7 @@
 								<div class="text-sm font-medium">{recordLabel(pr.key)}</div>
 								<div class="font-mono t-meta text-text-muted">{fmtDate(pr.date)}</div>
 							</div>
-							<div class="font-mono text-sm font-bold text-pr">{pr.weight}kg x {pr.reps}</div>
+							<div class="font-mono text-sm font-bold text-pr">{pr.weight}kg × {pr.total}</div>
 						</div>
 					{/each}
 				</div>
