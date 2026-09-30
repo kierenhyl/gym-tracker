@@ -18,7 +18,10 @@
 
 	// Only the exercise being worked on shows its full detail. Everything else
 	// collapses to one line, so heights stay uniform and the day stays scannable.
-	let expanded = $derived(isActive && isCurrent);
+	// Before a session, a tapped card opens as a preview: you can read the
+	// target and switch bands, but logging waits for the session.
+	let expanded = $derived(isCurrent);
+	let preview = $derived(!isActive);
 
 	let dir = $derived(prescription?.direction);
 	let tone = $derived(dir?.tone ?? 'push');
@@ -90,10 +93,12 @@
 					class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg text-text-muted hover:text-accent {pickerOpen ? 'text-accent' : ''}">
 					<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
 				</button>
-				<button onclick={onTick} aria-label="Mark done without logging"
-					class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg text-text-muted hover:text-success">
-					<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-				</button>
+				{#if !preview}
+					<button onclick={onTick} aria-label="Mark done without logging"
+						class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg text-text-muted hover:text-success">
+						<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+					</button>
+				{/if}
 			</div>
 
 			{#if isCompleted}
@@ -145,7 +150,7 @@
 			{/if}
 
 			<!-- The instruction: weight × total. Nothing else at this size. -->
-			<button onclick={onTap} class="w-full text-left">
+			<button onclick={() => !preview && onTap?.()} disabled={preview} class="w-full text-left disabled:cursor-default">
 				<div class="flex items-baseline gap-2.5 mb-3">
 					<div>
 						<div class="t-display font-mono font-bold tabular-nums {loadArrow ? accent : 'text-text'}">{loadText}</div>
@@ -175,6 +180,10 @@
 			<p class="mt-3 px-2.5 py-2 rounded-lg bg-accent/5 border border-accent/25 t-meta text-accent">
 				No more than {MAX_SETS} sets to reach this
 			</p>
+
+			{#if preview}
+				<p class="mt-2 t-meta text-text-muted">Preview · start the session to log</p>
+			{/if}
 
 			{/if}
 

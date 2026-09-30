@@ -85,13 +85,22 @@
 	);
 
 	// The exercise you're up to: the first incomplete one, unless you tapped
-	// another to jump to it.
+	// another to jump to it. Before a session starts nothing is open until you
+	// tap one, and then it opens as a preview.
 	let currentSlotId = $derived.by(() => {
 		// A completed exercise can be focused too — tapping it should show what
 		// you logged, not hide it.
 		if (focusedSlotId) return focusedSlotId;
+		if (!isSessionActive) return null;
 		return $currentDay.exercises.find((e) => !completedExercises.includes(e.id))?.id ?? null;
 	});
+
+	// A card opened as a preview should not stay open once the session starts:
+	// the session opens on the first exercise.
+	function start() {
+		focusedSlotId = null;
+		startSession($currentDayIndex, pendingReadiness);
+	}
 
 	function loggedTodayFor(movement) {
 		const today = new Date().toISOString().slice(0, 10);
@@ -227,7 +236,7 @@
 						{/each}
 					</div>
 					<p class="t-label text-text-muted normal-case tracking-normal mb-3">{READINESS_BLURB[pendingReadiness]}</p>
-					<button onclick={() => startSession($currentDayIndex, pendingReadiness)}
+					<button onclick={start}
 						class="w-full py-4 rounded-xl bg-accent/10 border border-accent/30 text-accent font-semibold text-lg active:scale-[0.98]">
 						Start Session
 					</button>

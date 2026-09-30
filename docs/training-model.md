@@ -181,7 +181,10 @@ The interface has one job during a session: answer "what do I do right now,
 and which way am I pushing". Everything else is one tap away.
 
 **Hierarchy.** Only the exercise being worked on is expanded; the rest collapse
-to a single fixed-height line. The instruction is two values at `t-display` —
+to a single fixed-height line. Before a session starts, tapping a card opens it
+as a preview: the target, the band chips and history all work, but logging and
+ticking wait for the session, so a stray tap cannot save anything. The
+instruction is two values at `t-display` —
 **weight × total** — and nothing else on the card is that size.
 
 ```
