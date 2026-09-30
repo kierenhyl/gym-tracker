@@ -2,22 +2,15 @@ import { writable, derived, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import { program, exerciseIndex, movementForId, movementName } from './program.js';
 import { withTrainingModel, bandConfigFor, structureFor, GUARDRAIL_EXEMPT_MUSCLES } from './training.js';
-import {
-	BAND_ORDER,
-	bucketFor,
-	bucketLabel,
-	scoreFor,
-	effectiveReps,
-	estimatedOneRepMax
-} from './bands.js';
-import { prescribe, sessionsIn } from './prescribe.js';
+import { BANDS, bucketFor, bandLabel, repsOf } from './bands.js';
+import { prescribe, isStalled, sessionsInBand } from './prescribe.js';
+import { toSessions } from './sessions.js';
 
 // --- Config ---
 export const STALE_DAYS = 14;
 export const PROGRAM_VERSION = 2;
 export const WEEKLY_SETS_MIN = 10;
 export const WEEKLY_SETS_MAX = 20;
-export const RIR_DRIFT_SESSIONS = 2;
 
 export const READINESS = ['low', 'normal', 'high'];
 export const READINESS_LABELS = { low: 'ROUGH', normal: 'NORMAL', high: 'GOOD' };
@@ -73,17 +66,17 @@ const persistedStores = [
 ];
 
 // Historic rows predate rep bands. Split the old `method` into structure plus a
-// band derived from the reps actually performed, and stamp them `legacy`: no
-// effort was ever recorded against them, so they seed bests but must not drive
-// today's prescriptions.
+// per-set bucket, and stamp them `legacy` when no effort was recorded. Rows
+// logged as one total (`format: 'total'`) are already complete. Neither kind
+// is rewritten into the other: sessions.js reads both.
 function migrateLog(log) {
 	return log.map((entry) => {
-		if (entry.structure && entry.bucket) return entry;
+		if (entry.format === 'total' || (entry.structure && entry.bucket)) return entry;
 		const movement = entry.movement ?? movementForId(entry.exerciseId);
 		const def = exerciseIndex[entry.exerciseId];
 		const structure = entry.structure ?? structureFor(entry.method ?? def?.method);
 		const next = { ...entry, movement, structure };
-		next.bucket = bucketFor(next, bandsForMovement(movement, def?.repRange, structure));
+		next.bucket = bucketFor(next, bandConfigFor(movement, def?.repRange, def?.sets).bands);
 		if (entry.rir == null) next.legacy = true;
 		return next;
 	});
@@ -391,74 +384,51 @@ if (browser) {
 	});
 }
 
-// --- Records ---
+// --- Sessions and records ---
 
 export const currentDay = derived(currentDayIndex, ($i) => program[$i]);
 
-// A record is movement + bucket, where bucket is the rep band for straight sets
-// and 'myo' for myo-reps. The same movement on different days shares a record
-// per bucket; a different rep band keeps its own.
-export function recordKey(movement, bucket) {
-	return `${movement}::${bucket}`;
+// A record is movement + band. The same movement on different days shares a
+// record per band; a different band keeps its own.
+export function recordKey(movement, band) {
+	return `${movement}::${band}`;
 }
 
-function bandsForMovement(movement, repRange, structure) {
-	return bandConfigFor(movement, repRange, structure).bands;
-}
+const movementOf = (entry) => entry.movement ?? movementForId(entry.exerciseId);
 
-// Eligible buckets for a logged entry, resolving custom variants too.
-function bandsForEntry(entry) {
-	const movement = entry.movement ?? movementForId(entry.exerciseId);
+// Bands and totals for a logged entry. Custom variants are not in the
+// programme index, so rows carry the range and set count they were logged
+// against.
+function configForEntry(entry) {
 	const def = exerciseIndex[entry.exerciseId];
-	const structure = entry.structure ?? structureFor(entry.method ?? def?.method);
-	return bandsForMovement(movement, def?.repRange, structure);
+	return bandConfigFor(
+		movementOf(entry),
+		entry.targetRepRange ?? def?.repRange,
+		entry.targetSets ?? def?.sets
+	);
 }
 
-export function entryKey(entry) {
-	const movement = entry.movement ?? movementForId(entry.exerciseId);
-	const bucket = bucketFor(entry, bandsForEntry(entry)) ?? 'moderate';
-	return recordKey(movement, bucket);
+// Every performance in the log, one row each, oldest first. See sessions.js
+// for how set-by-set history is converted.
+export function sessionsOf(log) {
+	return toSessions(log, movementOf, configForEntry);
 }
 
-// Best per movement+bucket. Heavy and moderate rank by estimated 1RM (so
-// 10 x 90kg correctly beats 4 x 100kg); volume and myo rank by total load.
-export const records = derived(workoutLog, ($log) => {
+export const sessions = derived(workoutLog, sessionsOf);
+
+// Best per movement+band, by weight × total reps.
+export const records = derived(sessions, ($sessions) => {
 	const recs = {};
-	for (const entry of $log) {
-		if (entry.weight == null || entry.reps == null) continue;
-		const movement = entry.movement ?? movementForId(entry.exerciseId);
-		const bucket = bucketFor(entry, bandsForEntry(entry));
-		if (!bucket) continue;
-		const key = recordKey(movement, bucket);
-		const score = scoreFor(bucket, entry.weight, effectiveReps(entry));
-		const current = recs[key];
-		if (!current || score > current.score) {
-			recs[key] = {
-				weight: entry.weight,
-				reps: entry.reps,
-				totalReps: entry.totalReps ?? null,
-				score,
-				bucket,
-				date: entry.date,
-				legacy: !!entry.legacy
-			};
-		}
+	for (const s of $sessions) {
+		const key = recordKey(s.movement, s.band);
+		if (!recs[key] || s.score > recs[key].score) recs[key] = s;
 	}
 	return recs;
 });
 
-export function recordsFor(recs, exercise) {
-	if (!exercise) return [];
-	const buckets = exercise.structure === 'myorep' ? ['myo'] : (exercise.bands ?? BAND_ORDER);
-	return buckets
-		.map((bucket) => ({ bucket, record: recs[recordKey(exercise.movement, bucket)] }))
-		.filter((b) => b.record);
-}
-
-export function recordFor(recs, exercise, bucket) {
+export function recordFor(recs, exercise, band) {
 	if (!exercise) return undefined;
-	const b = bucket ?? (exercise.structure === 'myorep' ? 'myo' : exercise.defaultBand);
-	return recs[recordKey(exercise.movement, b)];
+	return recs[recordKey(exercise.movement, band ?? exercise.defaultBand)];
 }
 
 function daysBetween(iso, now = Date.now()) {
@@ -475,22 +445,18 @@ export const staleRecords = derived(records, ($recs) => {
 	return stale;
 });
 
-export function staleDaysFor(stale, exercise, bucket) {
-	if (!exercise) return 0;
-	const b = bucket ?? (exercise.structure === 'myorep' ? 'myo' : exercise.defaultBand);
-	return stale[recordKey(exercise.movement, b)] ?? 0;
+export function historyForMovement(allSessions, movement) {
+	return allSessions.filter((s) => s.movement === movement);
 }
 
-export function historyForMovement(log, movement) {
-	return log
-		.filter((e) => e.weight != null && (e.movement ?? movementForId(e.exerciseId)) === movement)
-		.slice()
-		.sort((a, b) => new Date(a.date) - new Date(b.date));
-}
-
-export function getExerciseHistory(movement, bucket) {
-	const key = recordKey(movement, bucket);
-	return derived(workoutLog, ($log) => $log.filter((e) => e.weight != null && entryKey(e) === key));
+// One chip per band on the card: its range, and the weight you last used in it.
+export function bandChoices(allSessions, exercise) {
+	const history = historyForMovement(allSessions, exercise.movement);
+	return exercise.bands.map((band) => {
+		const [lo, hi] = exercise.targetTotals[band];
+		const last = sessionsInBand(history, band).at(-1);
+		return { band, label: BANDS[band].label, lo, hi, lastWeight: last?.weight ?? null };
+	});
 }
 
 // --- Variants ---
@@ -572,42 +538,36 @@ export function removeCustomVariant(slotId, variantId) {
 
 // --- Coaching ---
 
-// Best set from another variant of the same slot, shown as a reference when
-// there is no history on the station picked today.
-export function referenceFor(log, slot, exercise, custom) {
+// The latest session on another variant of the same slot, shown as a reference
+// when there is no history on the station picked today. Same band if there is
+// one, since a low-rep weight is no guide to a high-rep one.
+export function referenceFor(allSessions, slot, exercise, band, custom) {
 	if (!slot || !exercise) return null;
 	const siblings = slotVariantsWithCustom(slot, custom)
 		.map((v) => v.movement)
 		.filter((m) => m && m !== exercise.movement);
-	let best = null;
-	for (const entry of log) {
-		if (entry.weight == null) continue;
-		const movement = entry.movement ?? movementForId(entry.exerciseId);
-		if (!siblings.includes(movement)) continue;
-		const score = estimatedOneRepMax(entry.weight, effectiveReps(entry));
-		if (!best || score > best.score) {
-			best = { name: displayName(movement), weight: entry.weight, reps: entry.reps, score };
-		}
-	}
-	return best;
+	const theirs = allSessions.filter((s) => siblings.includes(s.movement));
+	const pick = theirs.filter((s) => s.band === band).at(-1) ?? theirs.at(-1);
+	return pick ? { name: displayName(pick.movement), weight: pick.weight, total: pick.total } : null;
 }
 
-export function prescriptionFor(log, slot, exercise, readiness = 'normal', custom, now = Date.now()) {
+export function prescriptionFor(allSessions, slot, exercise, band, readiness = 'normal', custom) {
 	if (!exercise) return null;
+	const b = band ?? exercise.defaultBand;
 	return prescribe({
 		exercise,
-		history: historyForMovement(log, exercise.movement),
+		sessions: historyForMovement(allSessions, exercise.movement),
+		band: b,
 		readiness,
-		reference: referenceFor(log, slot, exercise, custom),
-		now
+		reference: referenceFor(allSessions, slot, exercise, b, custom)
 	});
 }
 
 // --- Fatigue guardrails ---
 
 // Programmed hard sets per muscle over the last 7 days. Legs are excluded: one
-// exercise at one set per day is the programme's deliberate recovery choice,
-// not an accident to be flagged.
+// exercise per day is the programme's deliberate recovery choice, not an
+// accident to be flagged.
 export function weeklySetsByMuscle(history, days = 7) {
 	const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 	const totals = {};
@@ -623,117 +583,55 @@ export function weeklySetsByMuscle(history, days = 7) {
 	return totals;
 }
 
-export function rirDrift(log, sessions = RIR_DRIFT_SESSIONS) {
-	const byDay = new Map();
-	for (const e of log) {
-		if (e.rir == null) continue;
-		const day = new Date(e.date).toISOString().slice(0, 10);
-		if (!byDay.has(day)) byDay.set(day, []);
-		byDay.get(day).push(e);
+export function stalledMovements(allSessions) {
+	const byKey = new Map();
+	for (const s of allSessions) {
+		const key = recordKey(s.movement, s.band);
+		if (!byKey.has(key)) byKey.set(key, []);
+		byKey.get(key).push(s);
 	}
-	const days = [...byDay.keys()].sort().slice(-sessions);
-	if (days.length < sessions) return false;
-	return days.every((d) => {
-		const sets = byDay.get(d);
-		return sets.filter((s) => s.rir === 0).length / sets.length > 0.5;
-	});
-}
-
-export function stalledMovements(log) {
 	const out = [];
-	const seen = new Set();
-	for (const entry of log) {
-		const movement = entry.movement ?? movementForId(entry.exerciseId);
-		const bands = bandsForEntry(entry);
-		const bucket = bucketFor(entry, bands);
-		if (!movement || !bucket) continue;
-		const key = recordKey(movement, bucket);
-		if (seen.has(key)) continue;
-		seen.add(key);
-		const sessions = sessionsIn(historyForMovement(log, movement), bucket, bands);
-		if (sessions.length < 3) continue;
-		const recent = sessions.slice(-3);
-		if (recent.some((s) => s.legacy)) continue;
-		if (recent.slice(1).every((s) => s.score <= recent[0].score)) {
-			out.push({ key, movement, bucket, load: recent[recent.length - 1].weight });
-		}
+	for (const [key, list] of byKey) {
+		if (isStalled(list)) out.push({ key, load: list.at(-1).weight });
 	}
 	return out;
 }
 
 // --- Analytics ---
 
-export { estimatedOneRepMax };
-
-function isBetterPerformance(candidate, current) {
-	if (!current) return true;
-	return (
-		scoreFor(candidate.bucket, candidate.weight, effectiveReps(candidate)) >
-		scoreFor(current.bucket, current.weight, effectiveReps(current))
-	);
+export function exerciseProgress(allSessions, key) {
+	return allSessions
+		.filter((s) => recordKey(s.movement, s.band) === key)
+		.map((s) => ({ date: s.date, weight: s.weight, total: s.total }));
 }
 
-// One exercise logged as several sets is one performance, not several. Collapse
-// sibling rows sharing a setGroupId to the best set — per bucket, so a session
-// with a heavy top set and lighter back-offs can register in both.
-function performanceEntries(log) {
-	const groups = new Map();
-	log.forEach((entry, index) => {
-		if (entry.weight == null || entry.reps == null) return;
-		const movement = entry.movement ?? movementForId(entry.exerciseId);
-		const bucket = bucketFor(entry, bandsForEntry(entry));
-		if (!bucket) return;
-		const key = recordKey(movement, bucket);
-		const groupId = entry.setGroupId ?? `legacy-${index}`;
-		const id = `${key}::${groupId}`;
-		const candidate = { ...entry, key, bucket, setGroupId: groupId };
-		const current = groups.get(id);
-		if (!current || isBetterPerformance(candidate, current)) groups.set(id, candidate);
-	});
-	return [...groups.values()];
-}
-
-export function exerciseProgress(log, key) {
-	return performanceEntries(log)
-		.filter((e) => e.key === key)
-		.map((e) => ({
-			date: e.date,
-			weight: e.weight,
-			reps: e.reps,
-			e1rm: estimatedOneRepMax(e.weight, effectiveReps(e)),
-			volume: e.weight * effectiveReps(e)
-		}));
-}
-
-function walkPRs(log, onPR) {
+function walkPRs(allSessions, onPR) {
 	const best = {};
-	for (const entry of performanceEntries(log)) {
-		const score = scoreFor(entry.bucket, entry.weight, effectiveReps(entry));
-		if (best[entry.key] == null || score > best[entry.key]) {
-			best[entry.key] = score;
-			onPR(entry);
+	for (const s of allSessions) {
+		const key = recordKey(s.movement, s.band);
+		if (best[key] == null || s.score > best[key]) {
+			best[key] = s.score;
+			onPR({ ...s, key });
 		}
 	}
 }
 
-export function recentPRs(log, days = 30) {
+export function recentPRs(allSessions, days = 30) {
 	const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 	const prs = [];
-	walkPRs(log, (e) => {
-		if (new Date(e.date).getTime() >= cutoff) {
-			prs.push({ key: e.key, bucket: e.bucket, weight: e.weight, reps: e.reps, date: e.date });
-		}
+	walkPRs(allSessions, (s) => {
+		if (new Date(s.date).getTime() >= cutoff) prs.push(s);
 	});
 	return prs.reverse();
 }
 
-export function countPRsInWindow(log, startDaysAgo, endDaysAgo) {
+export function countPRsInWindow(allSessions, startDaysAgo, endDaysAgo) {
 	const now = Date.now();
 	const start = now - startDaysAgo * 24 * 60 * 60 * 1000;
 	const end = now - endDaysAgo * 24 * 60 * 60 * 1000;
 	let count = 0;
-	walkPRs(log, (e) => {
-		const t = new Date(e.date).getTime();
+	walkPRs(allSessions, (s) => {
+		const t = new Date(s.date).getTime();
 		if (t >= start && t < end) count++;
 	});
 	return count;
@@ -761,20 +659,21 @@ export function currentStreak(history) {
 
 export function totalVolumeLifted(log) {
 	return log.reduce(
-		(sum, e) => sum + (e.weight != null && e.reps != null ? e.weight * effectiveReps(e) : 0),
+		(sum, e) => sum + (e.weight != null && e.reps != null ? e.weight * repsOf(e) : 0),
 		0
 	);
 }
 
-export function biggestGain(log, days = 60) {
+// The biggest rise in working weight on one movement and band: the weight goes
+// up only when a range is topped, so it is the cleanest sign of progress.
+export function biggestGain(allSessions, days = 60) {
 	const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 	const before = {};
 	const after = {};
-	for (const e of performanceEntries(log)) {
-		const est = estimatedOneRepMax(e.weight, effectiveReps(e));
-		const t = new Date(e.date).getTime();
-		if (t < cutoff) before[e.key] = Math.max(before[e.key] ?? 0, est);
-		else after[e.key] = Math.max(after[e.key] ?? 0, est);
+	for (const s of allSessions) {
+		const key = recordKey(s.movement, s.band);
+		if (new Date(s.date).getTime() < cutoff) before[key] = Math.max(before[key] ?? 0, s.weight);
+		else after[key] = Math.max(after[key] ?? 0, s.weight);
 	}
 	let top = null;
 	for (const key of Object.keys(after)) {
@@ -802,80 +701,51 @@ export function exerciseName(id) {
 }
 
 export function recordLabel(key) {
-	const [movement, bucket] = key.split('::');
+	const [movement, band] = key.split('::');
 	const name = displayName(movement);
-	return bucket === 'moderate' ? name : `${name} · ${bucketLabel(bucket).toLowerCase()}`;
+	return band === 'moderate' ? name : `${name} · ${bandLabel(band).toLowerCase()}`;
 }
 
 // --- Actions ---
 
-// Log every work set together. Each row stays editable and counts toward total
-// volume; `setGroupId` lets analytics treat the exercise as one performance.
-// The bucket is stamped per set from the reps actually done, so a heavy top set
-// and lighter back-offs land in the records they really competed against.
-export function updateRecords(exerciseId, sets, opts = {}) {
-	const { readiness = null, movement, structure, bands, targetRepRange } = opts;
-	const validSets = sets
-		.map((set) => ({
-			weight: parseFloat(set.weight),
-			reps: parseInt(set.reps),
-			rir: set.rir ?? null,
-			totalReps: set.totalReps != null ? parseInt(set.totalReps) || null : null
-		}))
-		.filter((set) => set.weight > 0 && set.reps > 0);
-	if (validSets.length === 0) return;
-
-	const def = exerciseIndex[exerciseId];
-	const mv = movement ?? def?.movement ?? movementForId(exerciseId);
-	const st = structure ?? def?.structure ?? structureFor(def?.method);
-	const eligible = bands ?? bandsForMovement(mv, def?.repRange, st);
-	const date = new Date().toISOString();
-	const setGroupId = globalThis.crypto?.randomUUID?.() ?? `${date}-${exerciseId}`;
-
-	const entries = validSets.map((set, index) => {
-		const entry = {
-			date,
-			exerciseId,
-			movement: mv,
-			structure: st,
-			weight: set.weight,
-			reps: set.reps,
-			totalReps: st === 'myorep' ? set.totalReps : null,
-			rir: set.rir,
-			readiness,
-			setGroupId,
-			setNumber: index + 1,
-			targetSets: def?.sets ?? validSets.length,
-			targetRepRange: targetRepRange ?? def?.repRange ?? null
-		};
-		entry.bucket = bucketFor(entry, eligible);
-		return entry;
-	});
-
-	workoutLog.update(($log) => [...$log, ...entries]);
+// One row per exercise: the weight and the total reps reached at it. The band
+// is the one picked on the card, stored rather than derived. Range and set
+// count are stored too, so a custom variant's row can still be filed.
+export function logSession(exercise, { weight, total, band }, opts = {}) {
+	const w = parseFloat(weight);
+	const t = parseInt(total);
+	if (!(w > 0) || !(t > 0) || !exercise) return;
+	workoutLog.update(($log) => [
+		...$log,
+		{
+			format: 'total',
+			date: new Date().toISOString(),
+			exerciseId: exercise.id,
+			movement: exercise.movement,
+			structure: 'straight',
+			weight: w,
+			reps: t,
+			band,
+			bucket: band,
+			readiness: opts.readiness ?? null,
+			targetSets: exercise.sets ?? null,
+			targetRepRange: exercise.repRange ?? null
+		}
+	]);
 }
 
-export function updateRecord(exerciseId, weight, reps, opts = {}) {
-	updateRecords(exerciseId, [{ weight, reps, rir: opts.rir, totalReps: opts.totalReps }], opts);
-}
-
-// Correct a logged set. Changing the reps can move it into a different band,
-// which is right — the band always reflects what was actually done.
-export function editLogEntry(entry, weight, reps, opts = {}) {
+// Correct a logged row. On an old myo-rep row the number that counts is the
+// total, so that is what the reps field edits.
+export function editLogEntry(entry, weight, reps) {
 	const w = parseFloat(weight);
 	const r = parseInt(reps);
 	if (isNaN(w) || isNaN(r) || w <= 0 || r <= 0) return;
 	workoutLog.update(($log) =>
 		$log.map((e) => {
 			if (e !== entry) return e;
-			const next = {
-				...e,
-				weight: w,
-				reps: r,
-				totalReps: opts.totalReps != null ? parseInt(opts.totalReps) || null : e.totalReps,
-				rir: opts.rir !== undefined ? opts.rir : e.rir
-			};
-			next.bucket = bucketFor({ ...next, bucket: null }, bandsForEntry(next));
+			if (e.totalReps != null) return { ...e, weight: w, totalReps: r };
+			const next = { ...e, weight: w, reps: r };
+			if (e.format !== 'total') next.bucket = bucketFor({ ...next, bucket: null }, configForEntry(next).bands);
 			return next;
 		})
 	);

@@ -1,111 +1,39 @@
 // The coaching layer: turns your history into one instruction for today.
 //
-// Engine is double progression — hold a load until you reach the top of the
-// target rep range, then add the smallest increment and drop back to the
-// bottom. RIR gates it, so the app never tells you to add weight off a set you
-// barely survived. See docs/training-model.md for the reasoning.
+// Double progression on a total. Hold the weight and add total reps each
+// session until you reach the top of the band's range, then go up a weight and
+// start again from the bottom. Every set goes to failure, so there is no
+// effort question: reaching the top is the whole signal. See
+// docs/training-model.md for the reasoning.
 
-import { BANDS, bucketFor, scoreFor, effectiveReps } from './bands.js';
+import { BANDS, sessionScore } from './bands.js';
 
-export const HEAVY_TEST_DAYS = 21; // min gap between heavy attempts on a movement
-export const HEAVY_TEST_DAYS_FRESH = 14; // relaxed when you report feeling good
-export const HEAVY_MIN_MODERATE_SESSIONS = 3; // build a base before testing
-export const STALL_SESSIONS = 3; // no improvement over this many -> deload
+export const STALL_SESSIONS = 3; // no gain at one weight over this many -> deload
 export const DELOAD_PCT = 0.9;
 export const REDUCE_PCT = 0.9;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-function dayKey(iso) {
-	return new Date(iso).toISOString().slice(0, 10);
-}
-
-function daysSince(iso, now = Date.now()) {
-	return (now - new Date(iso).getTime()) / DAY_MS;
-}
 
 export function roundLoad(kg) {
 	return Math.round(kg * 2) / 2;
 }
 
-// Collapse a bucket's entries into one session per calendar day, keeping the
-// best-scoring set of that day. Returns oldest-first.
-export function sessionsIn(history, bucket, eligible) {
-	const byDay = new Map();
-	for (const e of history) {
-		if (e.weight == null || e.reps == null) continue;
-		if (bucketFor(e, eligible) !== bucket) continue;
-		const key = dayKey(e.date);
-		const score = scoreFor(bucket, e.weight, effectiveReps(e));
-		const cur = byDay.get(key);
-		if (!cur || score > cur.score) byDay.set(key, { ...e, score });
-	}
-	return [...byDay.values()].sort((a, b) => new Date(a.date) - new Date(b.date));
+// Sessions in one band, oldest first.
+export function sessionsInBand(sessions, band) {
+	return sessions.filter((s) => s.band === band);
 }
 
-// No improvement across the most recent STALL_SESSIONS sessions.
-//
-// Only counts sessions logged under the current model. Migrated history has no
-// effort recorded against it, and a single mis-entered old set would otherwise
-// look like a plateau and trigger a deload you do not need.
+// No gain across the most recent STALL_SESSIONS sessions at the same weight.
+// A new weight resets the count: the total is expected to drop after a jump.
 export function isStalled(sessions) {
 	if (sessions.length < STALL_SESSIONS) return false;
 	const recent = sessions.slice(-STALL_SESSIONS);
-	if (recent.some((s) => s.legacy)) return false;
-	const base = recent[0].score;
-	return recent.slice(1).every((s) => s.score <= base);
+	if (recent.some((s) => s.weight !== recent[0].weight)) return false;
+	return recent.slice(1).every((s) => s.total <= recent[0].total);
 }
-
-// --- Band selection -------------------------------------------------------
-
-// Heavy work is a periodic test, not a weekly habit: you only earn it when the
-// exercise allows it, you have a moderate base, enough time has passed, and
-// your moderate work has actually improved since the last attempt.
-export function chooseBand(exercise, history, readiness = 'normal', now = Date.now()) {
-	let eligible = exercise.bands ?? ['moderate'];
-	if (readiness === 'low') eligible = eligible.filter((b) => b !== 'heavy');
-
-	const fallback = eligible.includes(exercise.defaultBand)
-		? exercise.defaultBand
-		: eligible.includes('moderate')
-			? 'moderate'
-			: eligible[0];
-
-	if (!eligible.includes('heavy') || fallback === 'heavy') {
-		return { band: fallback, heavyTest: false };
-	}
-
-	const moderate = sessionsIn(history, 'moderate', exercise.bands);
-	if (moderate.length < HEAVY_MIN_MODERATE_SESSIONS) return { band: fallback, heavyTest: false };
-
-	const heavy = sessionsIn(history, 'heavy', exercise.bands);
-	const lastHeavy = heavy[heavy.length - 1];
-	if (!lastHeavy) return { band: 'heavy', heavyTest: true, reason: 'first heavy anchor' };
-
-	const gate = readiness === 'high' ? HEAVY_TEST_DAYS_FRESH : HEAVY_TEST_DAYS;
-	if (daysSince(lastHeavy.date, now) < gate) return { band: fallback, heavyTest: false };
-
-	const since = new Date(lastHeavy.date).getTime();
-	const bestSince = Math.max(
-		0,
-		...moderate.filter((s) => new Date(s.date).getTime() > since).map((s) => s.score)
-	);
-	const bestBefore = Math.max(
-		0,
-		...moderate.filter((s) => new Date(s.date).getTime() <= since).map((s) => s.score)
-	);
-	if (bestSince > bestBefore) {
-		return { band: 'heavy', heavyTest: true, reason: 'moderate work has moved up' };
-	}
-	return { band: fallback, heavyTest: false };
-}
-
-// --- The prescription -----------------------------------------------------
 
 // --- Direction ---
 //
 // Which quantity should move today, and in what spirit. The UI renders the
-// arrow and the rep-range track from these fields rather than from any wording, so
+// arrow and the total bar from these fields rather than from any wording, so
 // wording and visuals can change independently.
 //
 //   move  'reps' | 'load' | 'none'  — which number carries the arrow
@@ -114,188 +42,128 @@ const KIND_DIRECTION = {
 	establish: { move: 'none', tone: 'new' },
 	calibrate: { move: 'none', tone: 'new' },
 	'add-reps': { move: 'reps', tone: 'push' },
-	'push-harder': { move: 'reps', tone: 'push' },
 	'add-load': { move: 'load', tone: 'new' },
 	'reduce-load': { move: 'load', tone: 'back-off' },
 	deload: { move: 'load', tone: 'back-off' },
-	consolidate: { move: 'none', tone: 'hold' },
-	confirm: { move: 'none', tone: 'hold' },
+	repeat: { move: 'none', tone: 'hold' },
 	match: { move: 'none', tone: 'hold' }
 };
-
-function directionFor(kind, { lastLoad, lastReps, targetLoad, targetReps, lo, hi }) {
-	const { move, tone } = KIND_DIRECTION[kind] ?? { move: 'none', tone: 'hold' };
-	return {
-		move,
-		tone,
-		load: { from: lastLoad ?? null, to: targetLoad ?? null, changed: move === 'load' },
-		// `from` is where the last session landed, `to` today's target: the track
-		// fills to `from` and rings `to`. A load step resets the fill to nothing.
-		reps: {
-			from: move === 'load' ? null : (lastReps ?? null),
-			to: targetReps ?? null,
-			lo,
-			hi
-		}
-	};
-}
-
-// history: every log entry for THIS variant (movement), chronological.
-// reference: optional { name, weight, reps, bucket } from a sibling movement,
-//            shown when you have no history on the station you picked today.
-export function prescribe({
-	exercise,
-	history = [],
-	readiness = 'normal',
-	reference = null,
-	now = Date.now()
-}) {
-	const { band, heavyTest, reason: bandReason } = chooseBand(exercise, history, readiness, now);
-	const isMyo = exercise.structure === 'myorep';
-	const bucket = isMyo ? 'myo' : band;
-	const increment = exercise.increment ?? 5;
-
-	const [lo, hi] = isMyo
-		? (exercise.targetReps?.myo ?? BANDS.volume.defaultTarget)
-		: (exercise.targetReps?.[band] ?? BANDS[band]?.defaultTarget ?? BANDS.moderate.defaultTarget);
-
-	const sessions = sessionsIn(history, bucket, exercise.bands);
-	const last = sessions[sessions.length - 1];
-
-	const base = { band, bucket, isMyo, increment, targetLow: lo, targetHigh: hi, heavyTest };
-
-	if (!last) {
-		return {
-			...base,
-			kind: reference ? 'calibrate' : 'establish',
-			targetLoad: null,
-			targetReps: lo,
-			note: reference
-				? `start near ${reference.weight}kg — today is calibration`
-				: 'pick a load you can control for the full range',
-			reason: reference
-				? `No history here yet. On ${reference.name} you did ${reference.weight}kg × ${reference.reps} — start near that and treat today as calibration, not a PR attempt.`
-				: 'First time on this one. Pick a load you can control for the full range and leave 1-2 reps in the tank.',
-			last: null,
-			lastTotal: null,
-			reference,
-			direction: directionFor(reference ? 'calibrate' : 'establish', {
-				lastLoad: null,
-				lastReps: null,
-				targetLoad: null,
-				targetReps: lo,
-				lo,
-				hi
-			})
-		};
-	}
-
-	const lastReps = isMyo ? last.reps : effectiveReps(last); // myo gates on the activation set
-	const lastTotal = effectiveReps(last);
-	const lastLoad = last.weight;
-	const rir = last.rir ?? null;
-	const stalled = isStalled(sessions);
-
-	let kind, targetLoad, targetReps, note, reason;
-
-	if (stalled) {
-		kind = 'deload';
-		targetLoad = roundLoad(lastLoad * DELOAD_PCT);
-		targetReps = lo;
-		note = `3 sessions stuck at ${lastLoad}kg`;
-		reason = `Three sessions with no gain at ${lastLoad}kg. Back off about 10% today, rebuild from there — grinding a stall just banks fatigue.`;
-	} else if (lastReps < lo) {
-		if (rir === 0) {
-			kind = 'reduce-load';
-			targetLoad = roundLoad(lastLoad * REDUCE_PCT);
-			targetReps = lo;
-			note = `${lastLoad}kg is too heavy to grow on`;
-			reason = `Last time ${lastLoad}kg × ${lastReps} to failure — under the ${lo}-${hi} range. The load is too heavy to grow on. Drop it and earn the reps.`;
-		} else {
-			kind = 'push-harder';
-			targetLoad = lastLoad;
-			targetReps = lo;
-			reason = `Last time ${lastLoad}kg × ${lastReps} with reps left over. Same load — get to ${lo} and take it closer to failure.`;
-		}
-	} else if (lastReps < hi) {
-		kind = 'add-reps';
-		targetLoad = lastLoad;
-		targetReps = lastReps + 1;
-		// Myo progresses on the activation set, not the total. Chasing the total
-		// rewards holding back on the first set to earn more mini-sets, which is
-		// backwards. The total is still the record — see docs/training-model.md.
-		reason = isMyo
-			? `Hold ${lastLoad}kg and beat ${lastReps} on the activation set. At ${hi} there we add ${increment}kg. Total reps is your volume record, not the target.`
-			: `Last time ${lastLoad}kg × ${lastReps}. One more rep. Top of the range is ${hi}, then we add ${increment}kg.`;
-	} else {
-		const prev = sessions[sessions.length - 2];
-		const alreadyConsolidated =
-			prev && prev.weight === lastLoad && (isMyo ? prev.reps : effectiveReps(prev)) >= hi;
-		if (rir == null) {
-			kind = 'confirm';
-			targetLoad = lastLoad;
-			targetReps = lastReps;
-			note = 'no effort recorded last time — repeat it';
-			reason = `Last time ${lastLoad}kg × ${lastReps}, but no effort was recorded against it. Repeat it and tell me how close to failure you got — then I know whether to add ${increment}kg.`;
-		} else if (rir === 0 && !alreadyConsolidated) {
-			kind = 'consolidate';
-			targetLoad = lastLoad;
-			targetReps = hi;
-			reason = `You hit the top of the range but had nothing left. Repeat ${lastLoad}kg once to own it, then we add ${increment}kg.`;
-		} else if (exercise.repProgressionOnly) {
-			// The smallest available step here is 30-50% of the working load, so
-			// reps will fall a long way. Say so, or it reads as going backwards.
-			kind = 'add-load';
-			targetLoad = roundLoad(lastLoad + increment);
-			const jump = Math.round((increment / lastLoad) * 100);
-			targetReps = lo;
-			note = `+${increment}kg is a ${jump}% jump — reps will drop`;
-			reason = `You owned ${lastReps} at ${lastLoad}kg. The smallest step up is ${increment}kg, which is a ${jump}% jump on a movement this size — expect reps to drop well below ${lastReps}, maybe to ${lo}. That is normal here, not a regression. Build back up on reps.`;
-		} else {
-			kind = 'add-load';
-			targetLoad = roundLoad(lastLoad + increment);
-			targetReps = lo;
-			reason = `You topped the range at ${lastLoad}kg. Add ${increment}kg and drop back to ${lo} reps — or the nearest load you can actually get on.`;
-		}
-	}
-
-	// Readiness never blocks a deload, but it does stop you chasing a jump on a
-	// bad day. Match last session instead of beating it.
-	if (readiness === 'low' && (kind === 'add-load' || kind === 'add-reps')) {
-		kind = 'match';
-		targetLoad = lastLoad;
-		targetReps = lastReps;
-		note = 'rough day — match it, do not chase it';
-		reason = `You flagged a rough day. Match last session rather than chasing it — a maintained session beats a bad one you have to recover from.`;
-	}
-
-	if (heavyTest) {
-		reason = `Heavy test — ${bandReason ?? 'time to cash in your moderate work'}. Stay strict, stop with a rep in reserve. ${reason}`;
-	}
-
-	return {
-		...base,
-		kind,
-		targetLoad,
-		targetReps,
-		note: note ?? null,
-		reason,
-		last,
-		lastTotal,
-		reference,
-		direction: directionFor(kind, { lastLoad, lastReps, targetLoad, targetReps, lo, hi })
-	};
-}
 
 export const KIND_LABELS = {
 	establish: 'SET A BASELINE',
 	calibrate: 'CALIBRATE',
-	'add-reps': 'ADD A REP',
-	'add-load': 'ADD LOAD',
-	consolidate: 'CONSOLIDATE',
-	'push-harder': 'PUSH HARDER',
-	'reduce-load': 'DROP THE LOAD',
-	confirm: 'CONFIRM IT',
+	'add-reps': 'ADD REPS',
+	'add-load': 'ADD WEIGHT',
+	'reduce-load': 'DROP THE WEIGHT',
 	deload: 'DELOAD',
+	repeat: 'REPEAT IT',
 	match: 'MATCH IT'
 };
+
+// sessions:  every session for THIS variant (movement), any band, oldest first
+// band:      the band picked on the card; the exercise's default otherwise
+// reference: optional { name, weight, total } from a sibling station, shown
+//            when you have no history on the one you picked today
+export function prescribe({ exercise, sessions = [], band, readiness = 'normal', reference = null }) {
+	const b = exercise.bands?.includes(band) ? band : exercise.defaultBand;
+	const [lo, hi] = exercise.targetTotals?.[b] ?? [BANDS[b].perSet[0] * 3, BANDS[b].perSet[1] * 3];
+	const step = BANDS[b].step;
+	const inBand = sessionsInBand(sessions, b);
+	const last = inBand[inBand.length - 1] ?? null;
+	const base = { band: b, targetLow: lo, targetHigh: hi, last, reference };
+
+	let kind, targetLoad, targetReps, note, loadUp = false;
+
+	if (!last) {
+		kind = reference ? 'calibrate' : 'establish';
+		targetLoad = null;
+		targetReps = null;
+		note = reference
+			? `start near ${reference.weight}kg (${reference.name})`
+			: 'pick a weight you can control';
+	} else if (isStalled(inBand)) {
+		kind = 'deload';
+		targetLoad = roundLoad(last.weight * DELOAD_PCT);
+		targetReps = lo;
+		note = `${STALL_SESSIONS} sessions stuck at ${last.weight}kg`;
+	} else if (last.total >= hi) {
+		// The app cannot know the next weight on this machine, so it asks for
+		// "more than last time" and you type what you actually used.
+		kind = 'add-load';
+		targetLoad = last.weight;
+		loadUp = true;
+		targetReps = lo;
+		note = `next weight up from ${last.weight}kg`;
+	} else if (last.total >= lo) {
+		kind = 'add-reps';
+		targetLoad = last.weight;
+		targetReps = Math.min(last.total + step, hi);
+	} else {
+		const prev = inBand[inBand.length - 2];
+		if (prev && prev.weight === last.weight && prev.total < lo) {
+			kind = 'reduce-load';
+			targetLoad = roundLoad(last.weight * REDUCE_PCT);
+			targetReps = lo;
+			note = `under ${lo} twice at ${last.weight}kg`;
+		} else {
+			// Normal straight after a weight jump.
+			kind = 'repeat';
+			targetLoad = last.weight;
+			targetReps = lo;
+			note = `under ${lo} last time`;
+		}
+	}
+
+	// A rough day never chases a gain. Readiness never blocks a deload.
+	if (readiness === 'low' && (kind === 'add-load' || kind === 'add-reps')) {
+		kind = 'match';
+		targetLoad = last.weight;
+		loadUp = false;
+		targetReps = last.total;
+		note = 'rough day: match it, do not chase it';
+	}
+
+	const { move, tone } = KIND_DIRECTION[kind];
+	return {
+		...base,
+		kind,
+		targetLoad,
+		loadUp,
+		targetReps,
+		note: note ?? null,
+		// The bar fills to where the last session landed and rings today's
+		// target. A weight step empties it: the new rung starts from nothing.
+		direction: {
+			move,
+			tone,
+			total: { from: move === 'load' ? null : (last?.total ?? null), to: targetReps, lo, hi }
+		}
+	};
+}
+
+// What a total just typed on the log sheet means for next time, worked out by
+// the same rules that set today's target.
+export function preview({ exercise, sessions, band, weight, total }) {
+	const w = Number(weight);
+	const t = Number(total);
+	if (!(w > 0) || !(t > 0)) return null;
+	const next = prescribe({
+		exercise,
+		sessions: [...sessions, { date: new Date().toISOString(), weight: w, total: t, band, score: sessionScore(w, t) }],
+		band
+	});
+	switch (next.kind) {
+		case 'add-reps':
+			return { tone: 'push', text: `next time ${next.targetReps}` };
+		case 'add-load':
+			return { tone: 'new', text: 'top of the range: go up a weight next time' };
+		case 'repeat':
+			return { tone: 'hold', text: `under ${next.targetLow}: same weight next time` };
+		case 'reduce-load':
+			return { tone: 'back-off', text: `under ${next.targetLow} twice: drop the weight next time` };
+		case 'deload':
+			return { tone: 'back-off', text: `no gain in ${STALL_SESSIONS} sessions: deload next time` };
+		default:
+			return null;
+	}
+}

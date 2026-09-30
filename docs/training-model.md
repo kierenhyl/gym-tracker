@@ -1,292 +1,216 @@
 # Training model
 
 Why the app tracks what it tracks. This is the reasoning behind `bands.js`,
-`prescribe.js`, and the band config in `program.js` — read it before changing
-any of the numbers below.
+`sessions.js`, `prescribe.js` and `training.js`. Read it before changing any
+of the numbers below.
 
-## The problem this replaces
+## One number per exercise
 
-The old model kept one record per exercise, ranked by weight with reps only as
-a tiebreaker. So 4 × 100kg beat 10 × 90kg and stayed on the card forever, even
-though the second set is better work by every measure that matters:
+Each exercise has one target: a weight and a **total** number of reps, for
+example `80kg × 25`. You reach the total in as many sets as you need, up to
+five. Every set goes to failure, so the set count follows from fatigue on the
+day rather than from a plan.
 
-| Set | Total load | e1RM (Epley) | e1RM (Brzycki) |
+This replaced a fixed `weight × reps × sets` target (`80 × 9 × 3`), where
+progress was judged on the best single set.
+
+### The set cap
+
+The card and the log sheet both say **"No more than 5 sets to reach this"**
+(`MAX_SETS` in `bands.js`). Without it, a total can grow by adding sets rather
+than strength. At failure, reps drop with every set: `9, 7, 5, 3, 2, 2, 1` is 29,
+but sets five to seven add 5 reps of endurance, not strength.
+
+Sets are not logged, so the app cannot check the cap. It is a rule you keep.
+
+## Bands
+
+| Band | Key | Default per-set range | Step per session |
 |---|---|---|---|
-| 4 × 100kg | 400 | 113kg | 109kg |
-| 10 × 90kg | 900 | 120kg | 120kg |
+| Low | `heavy` | 3-5 | +1 |
+| Normal | `moderate` | 8-12 | +2 |
+| High | `volume` | 16-20 | +3 |
 
-Worse, the *method* (`straight` / `myorep` / `volume`) was a property of the
-program, decided before you walked into the gym. A high-rep day on an exercise
-programmed as `straight` was filed against a heavy PR it was never chasing, so
-it could only ever read as a failure.
+The keys predate the labels and stay as they are, because every stored row
+already carries them.
 
-## Two independent axes
+**The band is picked, not worked out.** With three fixed sets, reps per set
+told you the band. With a free set count they do not: 25 reps as five sets of
+five would read as low-rep work. So the card has a chip per band, and the band
+you pick is the band the session is saved under. Unpicked, a card uses the band
+its programmed range sits in. The pick lasts for the day.
 
-The old `method` field conflated two different things. They are now separate:
+Each band keeps its own weight and its own history. A chip shows the weight you
+last used in that band.
 
-- **Band** — *derived* from the reps you actually performed. Never declared.
-- **Structure** — *declared*, because the app cannot infer it: `straight` or
-  `myorep`.
+### Total-rep ranges
 
-### Bands
+A band's range is **programme sets × per-set range**. Smith bench is programmed
+3 × 6-10, so:
 
-| Band | Reps | Purpose |
-|---|---|---|
-| Heavy | 1–5 | Express and re-anchor strength |
-| Moderate | 6–15 | The default. Most of the work. |
-| Volume | 16+ | Isolation, joint-friendly work, under-recovered days |
+| Band | Range |
+|---|---|
+| Low | 3 × 3-5 = 9-15 |
+| Normal | 3 × 6-10 = 18-30 |
+| High | 3 × 16-20 = 48-60 |
 
-The moderate/volume line sits at 15, not the more conventional 12, because the
-boundaries are fitted to this programme rather than the other way round. With a
-6–12 moderate band, 18 of the programme's 26 movements have a prescribed rep
-range straddling a boundary — 10-15 and 8-15 appear everywhere. At 6–15 only
-four straddle, and all four are myo-rep movements, which are bucketed
-separately anyway. In practice nothing straddles.
+The band the programme's own range sits in uses that range as written, not the
+band default. Lateral raise is 3 × 12-20, which sits in High, so its High range
+is 36-60, not 48-60.
 
-Because the moderate band now reaches 15 reps, the estimated-1RM calculation
-clamps reps at 12 (`E1RM_REP_CAP`). Epley inflates badly past that, and a set of
-15 must not score as a bigger 1RM than it really represents.
+## Progression
 
-A set is filed by what you did, so a good high-rep day is compared against
-high-rep history. If the reps land in a band the exercise is not eligible for,
-the set snaps to the nearest eligible band rather than vanishing into an unused
-bucket (`nearestEligibleBand`).
+Double progression, on the total. Target and history both come from your
+**last session in this band on this variant**, never from an all-time best.
 
-### Records
+| Last session in this band | Today |
+|---|---|
+| None | Set a baseline: pick a weight, aim for the range |
+| At or over the top | **Add weight.** Anything over last time; the total goes back to the bottom |
+| Inside the range | Same weight, last total + step, capped at the top |
+| Under the bottom, once | Same weight, aim for the bottom. Normal right after a weight jump |
+| Under the bottom, twice at that weight | Drop about 10% |
+| No gain in 3 sessions at one weight | Deload about 10% |
+| Rough day (readiness) | Match last session instead of adding weight or reps |
 
-Records bucket by `movement::bucket`, where bucket is the band for straight
-sets and `myo` for myo-reps. Ranking within a bucket:
+Worked example, Normal (18-30):
 
-- **Heavy and moderate** → estimated 1RM (Epley). Only trustworthy to ~12 reps,
-  which is exactly the range these two bands cover.
-- **Volume and myo** → total load (weight × reps). Epley is fantasy above ~12
-  reps: it awards a set of 20 a 1.67× multiplier.
+| Session | Target | Did | Next |
+|---|---|---|---|
+| 1 | 80 × 25 | 26 | 80 × 28 |
+| 2 | 80 × 28 | 28 | 80 × 30 |
+| 3 | 80 × 30 | 31 | more than 80 × 18 |
+| 4 | 82.5 × 18 | 19 | 82.5 × 21 |
 
-### Myo-reps
+`scripts/verify-program.js` checks every row of that table.
 
-Not a band — a set structure, usually sitting in the moderate-to-high rep
-range. Comparing `weight × reps` to a straight set is meaningless, so myo-reps
-get their own track per movement. They record an activation set to near
-failure plus mini-sets with 10–20s rest.
+### The weight is typed, never assumed
 
-**Progression is on the activation set; the total is the record.** These are
-two different jobs and they were previously muddled — the card targeted the
-activation set, promised to beat the total, and drew its track over the
-activation range. One number now does each job:
+Machines and stacks step differently, so the app never works out the next
+weight. After topping the range the card shows `> 80↑` and the log sheet's
+weight field starts empty. Whatever you type becomes the new rung. Totals are
+only compared at the same weight.
 
-- **Activation reps** are what you chase, and what gates the load step. Reach
-  the top of the range on the activation set and the weight goes up.
-- **Total reps** (activation + mini-sets) is scored as tonnage and holds the
-  record for the movement. It is displayed, never targeted.
+### No effort question
 
-Chasing the total would reward holding back on the activation set to earn more
-mini-sets, which is exactly backwards. The mini-sets self-terminate; the
-activation set is the part you actually control.
+Every set goes to failure, so "how close to failure?" always has the same
+answer. The old engine used it to decide when to add weight. Now, reaching the
+top of the range is the whole signal.
 
-On the card this is one number with a `+`: `55kg × 12+ × 2` — twelve on the
-activation set, then mini-sets until you cannot, twice. The reference line
-carries the total: `last 55 × 11 → 23 total`.
+### The log sheet previews next time
 
-## Band eligibility is a safety rule
+Type a total and the sheet says what it means, using the same rules that set
+today's target: `next time 27`, `top of the range: go up a weight next time`,
+or `under 18: same weight next time`.
 
-Heavy work is allowed only where the setup is stable and a near-maximal effort
-does not depend on stabiliser fatigue or spinal position. See `HEAVY_ELIGIBLE`
-in `program.js`.
+## Records
+
+A best is per movement and band, ranked by **weight × total**. At the same
+weight, more reps wins. At the same total, a heavier weight wins.
+
+The best is not on the card. The card is today's job; the best is history.
+The two often disagree on purpose: after `80 × 31`, the next target is
+`82.5 × 18`, which is progress but below the best. Bests live in the history
+sheet and on the Stats tab.
+
+The Stats tab charts **working weight** per movement and band. It rises only
+when a range is topped, so it is the cleanest line of progress. The reps inside
+a rung show on the "now" line.
+
+## History logged set by set
+
+Nothing stored is rewritten. `sessions.js` reads the log and returns one row
+per session, whichever way it was logged:
+
+- **Logged as a total** (`format: 'total'`): one row, used as it is.
+- **Logged set by set**: rows sharing a `setGroupId` are one session. Rows from
+  before grouping existed are grouped by movement and day.
+  - **Total**: the reps of every set at the main weight, added up. `9, 8, 7`
+    is 24.
+  - **Weight**: the weight most sets used, the heaviest on a tie. A lighter
+    back-off set does not count towards the total.
+  - **Band**: the average reps per set, snapped to a band the exercise allows.
+- **Old myo-rep rows** already carried the whole effort in `totalReps`, so
+  that is the total. They go to the exercise's default band, because their
+  reps per set say nothing about the band they aimed at.
+
+A backup taken before this change restores cleanly, because the stored shape
+of old rows never changed.
+
+## Low-rep eligibility is a safety rule
+
+The Low band is offered only where the setup is stable and a near-maximal
+effort does not depend on stabiliser fatigue or spinal position. See
+`HEAVY_ELIGIBLE` in `training.js`.
 
 **Allowed (8 of 26):** smith bench press, machine shoulder press, machine
 incline press, chest-supported row, machine row, neutral-grip pulldown, hack
 squat, machine hip thrust.
 
-**Capped at moderate:** everything else — all dumbbell work (stabiliser
+**Normal and High only:** everything else — all dumbbell work (stabiliser
 limited), all cable isolation, the half-kneeling pulldown (unstable by design),
 leg extension and seated hamstring curl (knee and hamstring risk under
 near-maximal load), Pallof press (an anti-rotation drill, not a loadable lift).
 
-The programme itself never prescribes heavy work: its lowest range is 6–10. The
-heavy band is therefore only ever reached through the periodic heavy test. The
-one leg exercise per day is programmed at exactly one set, which happens to be
-the right shape for a heavy test anyway.
+## Myo-reps are retired
 
-## Load steps, and where they are not available
+Twelve slots used to be myo-reps: an activation set, then mini-sets with 15
+seconds' rest. A total with every set to failure does the same job with one
+rule instead of two, so the programme no longer has a `method` field.
+`verify-program.js` asserts that. Old myo-rep sessions keep their totals (see
+above).
 
-Smallest realistic jump is 2.5kg on a bar or dumbbell, 5kg on a plate-loaded
-machine or a stack. On four movements — cable lateral raise, reverse pec deck,
-reverse cable crossover, pec deck — a 5kg stack step is 30–50% of the working
-load. Single-step load progression is not really available there, which is
-presumably why they are programmed 12–20 rather than 8–12. Those movements are
-flagged `REP_PROGRESSION_ONLY`: they chase reps to the top of the range, and a
-load step is presented as an event that will drop reps sharply, not a routine
-increment.
+## Legs
 
-## The prescription engine
+The programme still has one leg exercise per day, asserted by
+`verify-program.js`. It no longer forces one hard set: leg exercises are
+programmed at 3 sets like the other compounds, so their range is 3 × the rep
+range, with the same set cap.
 
-The target comes from your **last session in this band on this variant**, never
-from an all-time PR. Chasing an all-time PR every session means training at RIR
-0 five days a week, which is how people stall and get hurt.
+History logged under the one-set rule is a single set, so it converts to a
+total under the new range (`100 × 9` against 18-30). The first session back
+reads as "repeat it" at the bottom of the range. That is expected, once.
 
-### Double progression
-
-Hold a load until you reach the top of the target rep range, then add the
-smallest increment and drop back to the bottom.
-
-| Last time in this band | RIR | Today |
-|---|---|---|
-| Below range | 0 | Load is too heavy — drop ~10% |
-| Below range | 1+ | Same load, push closer to failure |
-| Inside range | any | Same load, +1 rep |
-| At/above top | 1+ | Add the smallest increment, back to the bottom |
-| At/above top | 0 | Repeat once to consolidate, then add |
-| At/above top | unknown | Repeat and record the effort first |
-| No gain × 3 sessions | any | Deload 10% for one session, then rebuild |
-
-A load jump needs to know how hard the last set was. Adding a rep at the same
-load is safe without that; adding weight is not — hence the `confirm` case.
-
-### Effort is only asked for when it changes the answer
-
-Read the table above and the RIR column is blank — "any" — for every row where
-the reps land *inside* the range. The engine reads `rir` in exactly two places:
-below the range, and at or above the top of it. So those are the only two times
-the log screen asks.
-
-Land mid-range and the question does not appear at all; most sessions never see
-it. When it does appear, its appearing is the signal that this one matters, so
-it needs no explanatory copy beneath it.
-
-The check runs across every set in the group, not just the best one: sets in a
-group can land in different bands, and each band keeps its own history, so a set
-that is mid-range for today's prescription may be top-of-range for the band it
-actually lands in.
-
-### Choosing the band
-
-Hypertrophy is roughly equivalent from about 5 to 30 reps *provided the set is
-taken close to failure*. What differs is fatigue cost per unit of stimulus:
-heavy sets cost more joint and CNS fatigue, very high reps gas you out. Moderate
-is the efficiency sweet spot. Therefore:
-
-- Moderate is the default — most of your sets.
-- Heavy is a periodic test. It requires the exercise to be heavy-eligible, at
-  least 3 moderate sessions of base, at least 21 days since the last heavy
-  attempt on that movement (14 if you report feeling good), **and** measurable
-  improvement in your moderate work since that attempt.
-- Volume covers isolation, joint-unfriendly work, and under-recovered days.
-
-### Readiness
-
-One tap at session start (rough / normal / good). A rough day never programmes
-a heavy test, and downgrades "add load" or "add a rep" to "match last session".
-A maintained session beats a bad one you have to recover from. Readiness never
-blocks a deload.
-
-## Fatigue guardrails
-
-Three checks on the stats tab:
-
-1. **Stall detection** → the deload row above.
-2. **RIR drift** → if most sets in each of the last two sessions went to
-   failure, that is accumulated fatigue, not a strength problem.
-3. **Weekly hard sets per muscle** → programmed sets from completed sessions
-   over 7 days, against a 10–20 target band. Leg muscles are excluded
-   (`GUARDRAIL_EXEMPT_MUSCLES`): one exercise at one set per day is the
-   programme's deliberate recovery choice, asserted by
-   `scripts/verify-program.js`, not an accident to flag.
-
-## Equipment variations
-
-The same movement on a different station is not the same load — cable stacks
-are wired differently and machines have different leverage. Rather than fudge
-it with calibration offsets, you can add your own variation from inside the app
-("Cable machine by the pilates room"). It gets its own movement key and its own
-records, so numbers stay apples-to-apples. When you have no history on the
-variant you picked, the app shows a sibling's best as a **reference**, not a
-target, and treats the session as calibration.
-
-The programme deliberately ships no built-in alternatives — `verify-program.js`
-asserts there are none, and switching was previously disabled outright on the
-grounds that the researched primary movement should always win. User-created
-variations are the only swap mechanism, which keeps that intent: the programme
-is still fixed, you are only naming which physical station you used.
-
-## Migrated data
-
-Entries logged under the old model are kept in full. They are split into
-structure plus a band re-derived from the reps actually performed, and stamped
-`legacy: true` because no effort was ever recorded against them. Legacy entries
-seed your bests but deliberately do not drive prescriptions:
-
-- They never trigger a deload (one mis-entered old set would fake a plateau).
-- They never trigger a load jump — you get `confirm` instead, so the app has a
-  real RIR before adding weight.
-
-A wrong old record is not a blocker either: the target comes from recent work,
-and the record itself is editable from the card's BESTS panel.
+The weekly hard-set guardrail on the Stats tab still leaves leg muscles out
+(`GUARDRAIL_EXEMPT_MUSCLES`), because one exercise per day is still the
+programme's recovery choice.
 
 ## Visual language
 
-The interface has one job during a session: answer "what do I do right now, and
-which way am I pushing". Everything else is one tap away.
+The interface has one job during a session: answer "what do I do right now,
+and which way am I pushing". Everything else is one tap away.
 
 **Hierarchy.** Only the exercise being worked on is expanded; the rest collapse
-to a single fixed-height line. The instruction is a row of three values at
-`t-display` — **load × reps × sets** — and nothing else on the card is that
-size. Sets is the same size but dim, because it never moves; the two numbers
-that do move carry the colour and the arrow.
+to a single fixed-height line. Before a session starts, tapping a card opens it
+as a preview: the target, the band chips and history all work, but logging and
+ticking wait for the session, so a stray tap cannot save anything. The
+instruction is two values at `t-display` —
+**weight × total** — and nothing else on the card is that size.
 
 ```
-80  ×   9↑  ×   3
-KG      REPS    SETS
+80   ×   25↑
+KG       TOTAL REPS
 ```
 
-There is no explanatory sentence under it. The numbers, the `KIND_LABELS` chip
-and the track are the instruction. `prescription.reason` is no longer rendered
-anywhere — it read like something that could go stale (it could not; it is
-recomputed from current history every render) and it was one more thing to read
-mid-set. The `+ how to do it` tap now holds the movement cue and the programme's
-own RIR and rest. `reason` remains on the prescription object, unused. A short `prescription.note` stays on the face only where a
-bare number would be confusing on its own: a back-off, a `confirm`, a first
-session, and the rep-progression-only load jump.
+Above it sit the band chips. Below it sit the total bar, a short note only
+where a bare number would confuse (a back-off, a baseline, a weight step), and
+the highlighted set-cap line.
 
-Past bests are reference: one number, low contrast, for the
-band being trained today. An earlier version showed up to three all-time bests
-in gold at the top right, which both caused ragged card heights and argued
-against the model — the whole point is to chase last session in this band, not
-an all-time PR.
-
-**The rep-range track.** A dot per rep across the target range: filled where the
-last session landed, ringed on today's target. Filling the track and watching it
-reset on a load step is double progression made visible. A myo track ends in two
-small pips — the mini-sets after the activation set.
-
-**The set-shape mark.** Every collapsed row carries a mark in a fixed column: one
-dot for a straight set, a dot plus two smaller pips for a myo set. Twelve of the
-twenty-nine slots across the five days are myo, two to four on every day, and it
-is the distinction that changes what you do at the machine — full rest, or 15
-seconds and go again. It is a picture of the set rather than an icon to learn,
-and it matches the pips on the track.
-
-Band is deliberately *not* marked. The programme never prescribes heavy work, so
-a band label would read MODERATE on almost every row — the noise that the first
-redesign removed. The rep range on the track already separates 6-10 work from
-12-20 work, and a heavy test keeps its own gold chip because it is rare enough to
-be news.
+**The total bar.** From zero to the top of the range, with the range shaded.
+It fills to where the last session landed and rings today's target. A weight
+step empties it: the new rung starts from nothing, and the ring turns gold
+because that is progress, not failure.
 
 **Arrows.** The arrow sits on whichever quantity should move, driven by
-`prescription.direction` (`move`, `tone`, `load`, `reps`) rather than by parsing
-any wording, so copy and visuals can change independently. There is no
-`headline` field — the UI composes the hero row from the structured values.
+`prescription.direction` (`move`, `tone`), not by any wording.
 
 | `move` | `tone` | Reads as |
 |---|---|---|
-| `reps` | push | `80kg × 9↑` — hold the load, chase the rep |
-| `load` | new | `82.5↑kg × 6` — new rung, track resets |
-| `load` | back-off | `72.5↓kg × 6` — amber, ease off |
-| `none` | hold | no arrow — repeat and consolidate |
-| `none` | new | no track — find a starting load |
-
-A load step on the rep-progression-only movements resets reps sharply (20 → 12
-on a lateral raise). That must read as a promotion, not a failure: empty track
-plus copy that says so.
+| `reps` | push | `80 × 25↑` — hold the weight, add reps |
+| `load` | new | `> 80↑ × 18` — go up a weight, bar resets |
+| `load` | back-off | `72↓ × 18` — amber, ease off |
+| `none` | hold | no arrow — repeat or match |
+| `none` | new | no bar fill — set a baseline |
 
 **Colour — one meaning each.**
 
@@ -294,32 +218,33 @@ plus copy that says so.
 |---|---|
 | accent | act on this today |
 | success | done |
-| gold | an achievement just happened — never a resting record |
+| gold | an achievement or a new rung |
 | amber | ease off |
 | dim / muted | reference only |
 
 **Type — four steps.** `t-display` 20px for instruction numbers, `t-title` 15px
-for the exercise name, `t-body` 13px for reasons and notes, `t-label` / `t-meta`
-11px for everything else. The twelve ad-hoc sizes that preceded this (including
-four near-identical micro-sizes) are gone.
-
-**Redundancy.** The band label is implied by the rep range — "MODERATE" next to
-"6-10" says nothing. A band is surfaced only when it is news: a heavy test, or a
-set landing somewhere unexpected.
+for the exercise name, `t-body` 13px for notes, `t-label` / `t-meta` 11px for
+everything else.
 
 ## Sheets
 
 Every modal is one `Sheet.svelte`: capped at 85vh, with a sticky header carrying
-a 44px close button, plus Escape and backdrop-tap. They were 92vh with the only
-close button below the fold, which left an 8% strip of backdrop as the sole
-escape route — unusable one-handed between sets.
+a 44px close button, plus Escape and backdrop-tap, so it can be left one-handed
+between sets.
 
-## Variations
+## Equipment variations
 
-`variations.js` suggests one or two alternate stations per movement, offered as
-chips in the picker. Nothing is created until you tap one, so the picker holds
-what you actually use. Each becomes a custom variant with its own movement key
-and therefore its own records — a different cable stack is a different load.
-Suggestions are never heavy-eligible: `HEAVY_ELIGIBLE` lists specific stable
-setups, and a substitution made because the gym was busy is not where you test a
-near-maximal single.
+The same movement on a different station is not the same load. You can add
+your own variation from inside the app ("Cable machine by the pilates room").
+It gets its own movement key and its own history, so numbers stay
+apples-to-apples. With no history on the variant you picked, the app shows a
+sibling's last session as a **reference**, not a target.
+
+`variations.js` suggests one or two alternate stations per movement as chips in
+the picker. Nothing is created until you tap one. Custom variants are never
+Low-band eligible: `HEAVY_ELIGIBLE` lists specific stable setups, and a
+substitution made because the gym was busy is not where you test near-maximal
+work.
+
+The programme ships no built-in alternatives — `verify-program.js` asserts
+there are none.

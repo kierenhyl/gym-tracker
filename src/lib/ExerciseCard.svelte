@@ -1,14 +1,14 @@
 <script>
 	import { slide } from 'svelte/transition';
-	import { bucketLabel } from './bands.js';
 	import { KIND_LABELS } from './prescribe.js';
-	import RangeTrack from './RangeTrack.svelte';
+	import { MAX_SETS } from './bands.js';
+	import TotalBar from './TotalBar.svelte';
 
 	let {
-		slot, exercise, variants = [], bandRecord = null, prescription,
-		staleDays = 0, isActive, isCompleted, isCurrent = false, loggedToday = null,
+		slot, exercise, variants = [], choices = [], prescription,
+		isActive, isCompleted, isCurrent = false, loggedToday = null,
 		suggestions = [],
-		onTap, onTick, onUndoTick, onFocus, onSelectVariant, onAddVariant, onRemoveVariant, onEditHistory
+		onTap, onTick, onUndoTick, onFocus, onSelectBand, onSelectVariant, onAddVariant, onRemoveVariant, onEditHistory
 	} = $props();
 
 	let pickerOpen = $state(false);
@@ -18,43 +18,35 @@
 
 	// Only the exercise being worked on shows its full detail. Everything else
 	// collapses to one line, so heights stay uniform and the day stays scannable.
-	let expanded = $derived(isActive && isCurrent);
+	// Before a session, a tapped card opens as a preview: you can read the
+	// target and switch bands, but logging waits for the session.
+	let expanded = $derived(isCurrent);
+	let preview = $derived(!isActive);
 
 	let dir = $derived(prescription?.direction);
 	let tone = $derived(dir?.tone ?? 'push');
-	let isMyo = $derived(exercise.structure === 'myorep');
 
 	// The arrow sits on whichever quantity should move.
 	let loadArrow = $derived(dir?.move === 'load' ? (tone === 'back-off' ? '↓' : '↑') : '');
 	let repsArrow = $derived(dir?.move === 'reps' ? '↑' : '');
 
-	// Weight, reps, sets — the three things worth reading at a glance. Nothing
-	// else on the card gets this size.
-	let hasLoad = $derived(prescription?.targetLoad != null);
-	let loadText = $derived(hasLoad ? `${prescription.targetLoad}${loadArrow}` : '—');
-	let repsText = $derived(
-		!hasLoad
-			? `${prescription?.targetLow}-${prescription?.targetHigh}`
-			: // On a myo set the number is the activation set; the + is the mini-sets
-				// that follow it to failure.
-				`${prescription.targetReps}${isMyo ? '+' : ''}${repsArrow}`
-	);
-	let repsLabel = $derived(isMyo ? 'myo' : 'reps');
-	let setCount = $derived(exercise.sets ?? 1);
-
-	let loggedText = $derived(
-		loggedToday ? `${loggedToday.weight}kg × ${loggedToday.reps.join(', ')}` : ''
-	);
-
-	// Quiet reference. Myo shows the total it produced, because that is the
-	// record — but the activation set is what we are chasing.
-	let lastText = $derived.by(() => {
-		const l = prescription?.last;
-		if (!l) return null;
-		const total = prescription.lastTotal;
-		const tail = isMyo && total > l.reps ? ` → ${total} total` : '';
-		return `last ${l.weight} × ${l.reps}${tail}`;
+	// Weight and total — the two things worth reading at a glance. Nothing else
+	// on the card gets this size. After topping the range the app cannot know the
+	// next weight on this machine, so it asks for more than last time.
+	let loadText = $derived.by(() => {
+		if (prescription?.targetLoad == null) return '—';
+		return `${prescription.loadUp ? '> ' : ''}${prescription.targetLoad}${loadArrow}`;
 	});
+	let repsText = $derived(
+		prescription?.targetReps == null
+			? `${prescription?.targetLow}-${prescription?.targetHigh}`
+			: `${prescription.targetReps}${repsArrow}`
+	);
+
+	let loggedText = $derived(loggedToday ? `${loggedToday.weight}kg × ${loggedToday.total}` : '');
+	let lastText = $derived(
+		prescription?.last ? `last ${prescription.last.weight} × ${prescription.last.total}` : null
+	);
 
 	let accent = $derived(
 		tone === 'back-off' ? 'text-amber' : tone === 'hold' ? 'text-text-dim' : 'text-accent'
@@ -83,18 +75,6 @@
 			class="w-full flex items-center gap-3 px-3.5 py-3 text-left">
 			{#if isCompleted}
 				<svg class="w-3.5 h-3.5 text-success flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
-			{:else}
-				<!-- The shape of the set: one dot for a straight set, a dot plus two
-				     smaller pips for the mini-sets that follow a myo activation set.
-				     Fixed column, so the day scans down. -->
-				<span class="flex items-center gap-[3px] flex-shrink-0 w-6" aria-hidden="true">
-					<span class="w-1.5 h-1.5 rounded-full bg-border"></span>
-					{#if isMyo}
-						<span class="w-1 h-1 rounded-full bg-border/70"></span>
-						<span class="w-1 h-1 rounded-full bg-border/70"></span>
-					{/if}
-				</span>
-				<span class="sr-only">{isMyo ? 'Myo-rep set' : 'Straight sets'}</span>
 			{/if}
 			<span class="t-title truncate {isCompleted ? 'text-text-dim' : 'text-text'}">{exercise.name}</span>
 			<span class="t-label ml-auto flex-shrink-0 {isCompleted ? 'text-success/70' : 'text-text-muted'}">
@@ -113,10 +93,12 @@
 					class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg text-text-muted hover:text-accent {pickerOpen ? 'text-accent' : ''}">
 					<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
 				</button>
-				<button onclick={onTick} aria-label="Mark done without logging"
-					class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg text-text-muted hover:text-success">
-					<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-				</button>
+				{#if !preview}
+					<button onclick={onTick} aria-label="Mark done without logging"
+						class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded-lg text-text-muted hover:text-success">
+						<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+					</button>
+				{/if}
 			</div>
 
 			{#if isCompleted}
@@ -130,8 +112,8 @@
 						</div>
 						<span class="t-display font-mono text-text-dim/50">×</span>
 						<div>
-							<div class="t-display font-mono font-bold tabular-nums text-success">{loggedToday.reps.join(', ')}</div>
-							<div class="t-label text-text-muted">{isMyo ? 'myo' : 'reps'}</div>
+							<div class="t-display font-mono font-bold tabular-nums text-success">{loggedToday.total}</div>
+							<div class="t-label text-text-muted">total reps</div>
 						</div>
 					{:else}
 						<div class="t-display font-mono font-bold text-text-dim">—</div>
@@ -151,8 +133,24 @@
 					</button>
 				</div>
 			{:else}
-			<!-- The instruction: weight, reps, sets. Nothing else at this size. -->
-			<button onclick={onTap} class="w-full text-left">
+			<!-- Each band keeps its own weight and its own total. -->
+			{#if choices.length > 1}
+				<div class="grid gap-1.5 mb-3.5" style="grid-template-columns: repeat({choices.length}, minmax(0, 1fr))">
+					{#each choices as c (c.band)}
+						{@const on = c.band === prescription?.band}
+						<button onclick={() => onSelectBand?.(c.band)} aria-pressed={on}
+							class="py-2 px-1 rounded-lg border text-center transition-colors {on ? 'bg-accent/10 border-accent/40' : 'bg-bg border-border'}">
+							<div class="t-label {on ? 'text-accent' : 'text-text-dim'}">{c.label}</div>
+							<div class="t-meta mt-0.5 tabular-nums {on ? 'text-text' : 'text-text-muted'}">
+								{c.lastWeight != null ? `${c.lastWeight}kg · ` : ''}{c.lo}-{c.hi}
+							</div>
+						</button>
+					{/each}
+				</div>
+			{/if}
+
+			<!-- The instruction: weight × total. Nothing else at this size. -->
+			<button onclick={() => !preview && onTap?.()} disabled={preview} class="w-full text-left disabled:cursor-default">
 				<div class="flex items-baseline gap-2.5 mb-3">
 					<div>
 						<div class="t-display font-mono font-bold tabular-nums {loadArrow ? accent : 'text-text'}">{loadText}</div>
@@ -161,12 +159,7 @@
 					<span class="t-display font-mono text-text-dim/50">×</span>
 					<div>
 						<div class="t-display font-mono font-bold tabular-nums {repsArrow ? accent : 'text-text'}">{repsText}</div>
-						<div class="t-label text-text-muted">{repsLabel}</div>
-					</div>
-					<span class="t-display font-mono text-text-dim/50">×</span>
-					<div>
-						<div class="t-display font-mono font-bold tabular-nums text-text-dim">{setCount}</div>
-						<div class="t-label text-text-muted">{setCount === 1 ? 'set' : 'sets'}</div>
+						<div class="t-label text-text-muted">total reps</div>
 					</div>
 					<span class="t-label ml-auto flex-shrink-0 text-right {accent}">
 						{KIND_LABELS[prescription?.kind] ?? ''}
@@ -174,7 +167,7 @@
 				</div>
 
 				{#if dir}
-					<RangeTrack lo={dir.reps.lo} hi={dir.reps.hi} from={dir.reps.from} to={dir.reps.to} {tone} myo={isMyo} />
+					<TotalBar lo={dir.total.lo} hi={dir.total.hi} from={dir.total.from} to={dir.total.to} {tone} />
 				{/if}
 
 				<!-- Only where a bare number would be confusing on its own. -->
@@ -183,6 +176,15 @@
 				{/if}
 			</button>
 
+			<!-- The one rule that goes with a total. -->
+			<p class="mt-3 px-2.5 py-2 rounded-lg bg-accent/5 border border-accent/25 t-meta text-accent">
+				No more than {MAX_SETS} sets to reach this
+			</p>
+
+			{#if preview}
+				<p class="mt-2 t-meta text-text-muted">Preview · start the session to log</p>
+			{/if}
+
 			{/if}
 
 			<!-- Reference, deliberately quiet -->
@@ -190,25 +192,15 @@
 				{#if lastText}
 					<span class="t-label text-text-muted">{lastText}</span>
 				{/if}
-				{#if prescription?.heavyTest}
-					<span class="t-label text-pr">heavy test</span>
-				{/if}
-				{#if staleDays > 0}
-					<span class="t-label text-amber">{staleDays}d since best</span>
-				{/if}
 				<button onclick={() => onEditHistory?.()}
 					class="t-label ml-auto text-text-muted hover:text-text-dim">
-					{#if bandRecord}
-						{bucketLabel(bandRecord.bucket).slice(0, 3).toLowerCase()} best {bandRecord.weight}×{bandRecord.totalReps ?? bandRecord.reps}
-					{:else}
-						no record yet
-					{/if}
+					history
 				</button>
 			</div>
 
 			<!-- How to do it, not why we picked it: the numbers are the instruction,
 			     and an explanation of them was just something else to read. -->
-			{#if exercise.notes || exercise.rir || exercise.rest}
+			{#if exercise.notes || exercise.effort || exercise.rest}
 				<button onclick={() => (notesOpen = !notesOpen)} class="t-label text-text-muted mt-2 hover:text-text-dim">
 					{notesOpen ? '− how to do it' : '+ how to do it'}
 				</button>
@@ -218,11 +210,11 @@
 					{#if exercise.notes}
 						<p class="t-body text-text-muted">{exercise.notes}</p>
 					{/if}
-					<!-- The programme's own prescription: no longer on the face, but it
-					     is the only place rest and target effort are written down. -->
-					{#if exercise.rir || exercise.rest}
+					<!-- The programme's own prescription: not on the face, but it is the
+					     only place rest and effort are written down. -->
+					{#if exercise.effort || exercise.rest}
 						<p class="t-label text-text-muted">
-							{[exercise.rir, exercise.rest && `${exercise.rest} rest`].filter(Boolean).join(' · ')}
+							{[exercise.effort, exercise.rest && `${exercise.rest} rest`].filter(Boolean).join(' · ')}
 						</p>
 					{/if}
 				</div>

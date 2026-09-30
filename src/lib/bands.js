@@ -1,32 +1,33 @@
-// Rep bands, set structures, and how a set is scored.
+// Rep bands and how a session is scored.
 //
-// The core idea: a set's *band* is derived from the reps you actually did, not
-// declared up front. That means a hard 10 x 90kg day lands in the moderate
-// band and is compared against your best moderate work — it is never judged
-// against a heavy single-digit PR it was never trying to beat.
+// A session is one number per exercise: the weight, and the total reps you
+// reached at it across as many sets as you needed (no more than MAX_SETS).
+// Every set is taken to failure, so the set count follows from fatigue rather
+// than being chosen up front.
 //
-// Two independent axes:
-//   band       derived from reps  — heavy / moderate / volume
-//   structure  declared           — straight / myorep
+// The band is *declared*, not derived. When sets were fixed at three, reps per
+// set told you the band. With a free set count they do not: 25 reps as five
+// sets of five would read as heavy work. So the band you pick on the card is
+// the band the session is filed under.
 //
-// Records bucket by movement + bucket, where bucket is the band for straight
-// sets and 'myo' for myo-reps (a myo-rep set is a different animal and must
-// never be compared to a straight set).
+// Keys stay 'heavy' / 'moderate' / 'volume' because every stored entry already
+// carries them. Only the labels changed.
 
-// Boundaries are tuned to the actual programme, not the other way round.
-// With a 6-12 moderate band, 18 of the programme's 26 movements had a
-// prescribed rep range straddling a boundary (10-15 and 8-15 are everywhere).
-// Moving the line to 15 leaves 4 straddlers, all of them myo-rep movements,
-// which are bucketed separately anyway — so in practice nothing straddles.
+export const MAX_SETS = 5;
+
+// `perSet` is the rep range a band's default target is built from: the total
+// range is programme sets × perSet. `step` is how many total reps a session
+// adds while inside the range — bigger totals move in bigger steps.
 export const BANDS = {
-	heavy: { key: 'heavy', label: 'HEAVY', min: 1, max: 5, defaultTarget: [3, 5] },
-	moderate: { key: 'moderate', label: 'MODERATE', min: 6, max: 15, defaultTarget: [8, 12] },
-	volume: { key: 'volume', label: 'VOLUME', min: 16, max: Infinity, defaultTarget: [16, 20] }
+	heavy: { key: 'heavy', label: 'LOW', min: 1, max: 5, perSet: [3, 5], step: 1 },
+	moderate: { key: 'moderate', label: 'NORMAL', min: 6, max: 15, perSet: [8, 12], step: 2 },
+	volume: { key: 'volume', label: 'HIGH', min: 16, max: Infinity, perSet: [16, 20], step: 3 }
 };
 
 export const BAND_ORDER = ['heavy', 'moderate', 'volume'];
 
-// Which band a set falls into, based purely on reps performed.
+// Which band a number of reps per set falls into. Only used to file sessions
+// logged before bands were declared, from their average reps per set.
 export function classifyBand(reps) {
 	const r = Number(reps);
 	if (!r || r < 1) return null;
@@ -40,8 +41,6 @@ export function bandLabel(band) {
 }
 
 // Snap a band to the nearest one the exercise is actually allowed to train.
-// A 5-rep set on an exercise with no heavy band is a heavy-ish moderate set —
-// it must not vanish into a bucket that exercise never uses.
 export function nearestEligibleBand(band, eligible) {
 	if (!eligible || eligible.length === 0 || eligible.includes(band)) return band;
 	const i = BAND_ORDER.indexOf(band);
@@ -58,8 +57,8 @@ export function nearestEligibleBand(band, eligible) {
 	return best;
 }
 
-// The record bucket a set belongs to. Myo-reps get their own track per
-// movement regardless of rep count. `eligible` is the exercise's allowed bands.
+// Per-set bucket, kept for rows stored before sessions were totals. The
+// migration in store.js still stamps it; nothing ranks on it any more.
 export function bucketFor(entry, eligible) {
 	if (!entry) return null;
 	if (entry.bucket) return entry.bucket;
@@ -68,57 +67,16 @@ export function bucketFor(entry, eligible) {
 	return band ? nearestEligibleBand(band, eligible) : null;
 }
 
-export const BUCKET_LABELS = {
-	heavy: 'HEAVY',
-	moderate: 'MODERATE',
-	volume: 'VOLUME',
-	myo: 'MYO-REP'
-};
-
-export function bucketLabel(bucket) {
-	return BUCKET_LABELS[bucket] ?? String(bucket ?? '').toUpperCase();
-}
-
 // --- Scoring ---
 
-// Epley estimated 1RM. It inflates badly at high rep counts, so reps are
-// clamped at 12 for the estimate. The moderate band now runs to 15, and a set
-// of 15 must not score as a bigger 1RM than it really represents.
-export const E1RM_REP_CAP = 12;
-
-export function estimatedOneRepMax(weight, reps) {
-	const w = Number(weight);
-	const r = Math.min(Number(reps) || 0, E1RM_REP_CAP);
-	if (!w || !r) return 0;
-	return w * (1 + r / 30);
+// A session ranks by weight × total reps within its band. At the same weight
+// more reps wins; at the same total a heavier weight wins.
+export function sessionScore(weight, total) {
+	return (Number(weight) || 0) * (Number(total) || 0);
 }
 
-export function tonnage(weight, reps) {
-	return (Number(weight) || 0) * (Number(reps) || 0);
-}
-
-// How a set is ranked within its bucket.
-//   heavy / moderate -> estimated 1RM (so 10 x 90 correctly beats 4 x 100)
-//   volume / myo     -> total tonnage (load x reps done)
-export function scoreFor(bucket, weight, reps) {
-	if (bucket === 'volume' || bucket === 'myo') return tonnage(weight, reps);
-	return estimatedOneRepMax(weight, reps);
-}
-
-export function scoreLabel(bucket) {
-	return bucket === 'volume' || bucket === 'myo' ? 'total load' : 'est. 1RM';
-}
-
-// Format a score for display (kg for e1RM, raw tonnage otherwise).
-export function formatScore(bucket, score) {
-	if (!score) return '—';
-	if (bucket === 'volume' || bucket === 'myo') return `${Math.round(score)}`;
-	return `${Math.round(score * 10) / 10}kg`;
-}
-
-// The reps a set contributes for progression purposes. Myo-reps progress on
-// total effective reps (activation set plus every mini-set).
-export function effectiveReps(entry) {
-	if (entry?.structure === 'myorep' && entry.totalReps != null) return entry.totalReps;
-	return entry?.reps ?? 0;
+// The reps a stored row contributes. Old myo-rep rows kept the activation set
+// in `reps` and the whole effort in `totalReps`.
+export function repsOf(entry) {
+	return entry?.totalReps ?? entry?.reps ?? 0;
 }

@@ -23,7 +23,7 @@ jobs:
       - run: npm ci
 
       # The programme's own assertion script: no alternatives, exactly one leg
-      # exercise per day at one set.
+      # exercise per day, and the total-rep progression rules.
       - run: npm run verify:program
 
       - run: npm run build
