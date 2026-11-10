@@ -41,6 +41,17 @@ reads and writes your real training data.** It is not a sandbox.
 Before opening a preview, or before merging anything that touches how data is
 stored: **Stats → Download a backup.**
 
+## Saving
+
+Changes save about 10 seconds after the last one, at once when a session
+finishes, and when the app goes to the background. Each save has a 15-second
+deadline, because iOS can freeze a backgrounded app mid-request. Coming back to
+the app, or back online, retries anything unsaved.
+
+Unsaved changes are also kept on the phone (`localStorage`, key
+`gym_unsaved_v1`) until a save is confirmed. If the app is killed first, the
+next load offers to restore them.
+
 ## If a release goes wrong
 
 Vercel → the project → Deployments → the previous production deployment →
@@ -71,6 +82,7 @@ exception; that file holds names only.
 npm install
 npm run dev              # http://localhost:5173
 npm run verify:program   # asserts the programme is intact
+npm run verify:sync      # checks the save-recovery helpers
 npm run build            # what CI and Vercel run
 ```
 
@@ -79,8 +91,8 @@ npm run build            # what CI and Vercel run
 
 ## Checks
 
-`.github/workflows/ci.yml` runs `npm ci`, `npm run verify:program` and
-`npm run build` on every pull request and every push to `main`. A green tick on
+`.github/workflows/ci.yml` runs `npm ci`, `npm run verify:program`,
+`npm run verify:sync` and `npm run build` on every pull request and every push to `main`. A green tick on
 a PR means the programme is intact and the app compiles. Vercel's own check on
 the same PR means it deployed.
 
@@ -92,6 +104,7 @@ There is no deploy workflow in this repo, on purpose.
 |---|---|
 | `src/lib/program.js` | the five-day programme — edit exercises here |
 | `src/lib/store.js` | state, cloud sync, records |
+| `src/lib/sync.js` | save recovery: spotting our own save after a lost reply, when to offer a local copy back |
 | `src/lib/prescribe.js` | what to do today, and why |
 | `src/lib/bands.js` | rep bands, the set cap, and scoring |
 | `src/lib/sessions.js` | one row per session, converting set-by-set history |

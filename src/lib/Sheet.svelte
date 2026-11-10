@@ -9,12 +9,17 @@
 
 	import { fly, fade } from 'svelte/transition';
 
-	let { eyebrow = null, title = null, onClose, children } = $props();
+	// dismissible = false: no close button, Escape or backdrop. Only for a
+	// choice that must be made, where closing would have no clear meaning.
+	let { eyebrow = null, title = null, onClose, dismissible = true, children } = $props();
+	const close = () => {
+		if (dismissible) onClose?.();
+	};
 </script>
 
 <svelte:window
 	onkeydown={(e) => {
-		if (e.key === 'Escape') onClose?.();
+		if (e.key === 'Escape') close();
 	}}
 />
 
@@ -22,7 +27,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="fixed inset-0 z-40 bg-bg/90 backdrop-blur-sm"
-	onclick={onClose}
+	onclick={close}
 	in:fade={{ duration: 150 }}
 	out:fade={{ duration: 100 }}
 ></div>
@@ -47,8 +52,9 @@
 						<h2 class="text-xl font-bold truncate">{title}</h2>
 					{/if}
 				</div>
+				{#if dismissible}
 				<button
-					onclick={onClose}
+					onclick={close}
 					aria-label="Close"
 					class="w-11 h-11 -mr-2 -mt-1 flex-shrink-0 flex items-center justify-center rounded-xl text-text-muted hover:text-text active:scale-95"
 				>
@@ -56,6 +62,7 @@
 						<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
 					</svg>
 				</button>
+				{/if}
 			</div>
 		</div>
 
