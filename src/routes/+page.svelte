@@ -1,7 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import {
-		cloudPhase, migrationAvailable, initializeCloud, signOut, downloadCloudBackup,
+		cloudPhase, migrationAvailable, pendingRestore, initializeCloud, signOut, downloadCloudBackup,
 		currentDay, currentDayIndex, activeSession, sessions, records, recordFor,
 		historyForMovement, bandChoices, exerciseSelections, customVariants,
 		slotVariantsWithCustom, getActiveVariant, selectVariant,
@@ -11,6 +11,7 @@
 	import { suggestionsFor } from '$lib/variations.js';
 	import AccessGate from '$lib/AccessGate.svelte';
 	import MigrationModal from '$lib/MigrationModal.svelte';
+	import RestorePrompt from '$lib/RestorePrompt.svelte';
 	import SyncIndicator from '$lib/SyncIndicator.svelte';
 	import ExerciseCard from '$lib/ExerciseCard.svelte';
 	import LogModal from '$lib/LogModal.svelte';
@@ -309,6 +310,8 @@
 	<EditHistoryModal exercise={editHistoryExercise} onClose={() => { showEditHistory = false; editHistoryExercise = null; }} />
 {/if}
 
-{#if showMigration}
+{#if $pendingRestore}
+	<RestorePrompt />
+{:else if showMigration}
 	<MigrationModal onClose={() => { showMigration = false; migrationDismissed = true; }} />
 {/if}

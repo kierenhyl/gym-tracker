@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "db:migrate": "node --env-file=.env.local scripts/migrate.js",
-    "verify:program": "node scripts/verify-program.js"
+    "verify:program": "node scripts/verify-program.js",
+    "verify:sync": "node scripts/verify-sync.js"
   },
   "keywords": [],
   "author": "",

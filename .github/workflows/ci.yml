@@ -26,4 +26,8 @@ jobs:
       # exercise per day, and the total-rep progression rules.
       - run: npm run verify:program
 
+      # Pure sync helpers: recognising our own save after a lost reply, and
+      # when a local copy of unsaved changes is offered back.
+      - run: npm run verify:sync
+
       - run: npm run build

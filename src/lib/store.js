@@ -5,6 +5,7 @@ import { withTrainingModel, bandConfigFor, structureFor, GUARDRAIL_EXEMPT_MUSCLE
 import { BANDS, bucketFor, bandLabel, repsOf } from './bands.js';
 import { prescribe, isStalled, sessionsInBand } from './prescribe.js';
 import { toSessions } from './sessions.js';
+import { deepEqual, fingerprint, shouldOfferRestore } from './sync.js';
 
 // --- Config ---
 export const STALE_DAYS = 14;
@@ -30,6 +31,9 @@ export const cloudPhase = writable('loading'); // loading | setup | login | read
 export const syncStatus = writable('idle'); // idle | pending | saving | saved | error | conflict
 export const syncMessage = writable('');
 export const migrationAvailable = writable(false);
+// Set on load when this device holds changes the cloud does not have:
+// { changedAt, cloudUpdatedAt }. RestorePrompt.svelte asks what to do.
+export const pendingRestore = writable(null);
 
 let cloudVersion = 1;
 let initialized = false;
@@ -38,7 +42,30 @@ let dirty = false;
 let saveInFlight = false;
 let saveTimer;
 let lastMigration = null;
-const IDLE_SAVE_DELAY_MS = 2 * 60 * 1000;
+// Debounced: each change restarts the clock. Short, because a phone in a
+// pocket may never come back to the foreground to trigger a save.
+const IDLE_SAVE_DELAY_MS = 10 * 1000;
+// iOS can freeze a backgrounded web app mid-request. The request then never
+// settles, so every save is given a deadline.
+const SAVE_TIMEOUT_MS = 15 * 1000;
+
+// Each save gets a generation number. If a stuck save is abandoned, its
+// late handlers see a stale number and change nothing.
+let saveGeneration = 0;
+let saveStartedAt = 0;
+let saveController = null;
+// Bumped on every change, so a confirmed save knows whether the state moved
+// on while it was in flight.
+let changeCount = 0;
+// Snapshots sent with no confirmed reply (timeout, dropped connection). One
+// of them may have reached the database even though the reply was lost.
+const MAX_UNCONFIRMED = 5;
+let unconfirmed = [];
+
+// Unsaved state, mirrored to this device so an app killed in the background
+// does not lose it. Cleared once a save is confirmed.
+const MIRROR_KEY = 'gym_unsaved_v1';
+let restoreCandidate = null;
 
 // --- Stores ---
 
@@ -171,6 +198,7 @@ export async function initializeCloud(force = false) {
 
 		cloudVersion = stateResult.body.version;
 		applyState(stateResult.body.data);
+		checkLocalCopy(stateResult.body);
 		migrationAvailable.set(cloudIsEmpty());
 		cloudPhase.set('ready');
 		syncStatus.set('saved');
@@ -198,58 +226,221 @@ export async function signOut() {
 	syncStatus.set('idle');
 }
 
+// --- Local copy of unsaved state ---
+
+function writeMirror() {
+	if (!browser) return;
+	try {
+		localStorage.setItem(
+			MIRROR_KEY,
+			JSON.stringify({
+				data: stateSnapshot(),
+				baseVersion: cloudVersion,
+				changedAt: new Date().toISOString(),
+				sent: unconfirmed.map((u) => u.print)
+			})
+		);
+	} catch {
+		// Private mode or a full quota. The cloud save still runs.
+	}
+}
+
+function readMirror() {
+	if (!browser) return null;
+	try {
+		const raw = localStorage.getItem(MIRROR_KEY);
+		return raw ? JSON.parse(raw) : null;
+	} catch {
+		return null;
+	}
+}
+
+function clearMirror() {
+	if (!browser) return;
+	try {
+		localStorage.removeItem(MIRROR_KEY);
+	} catch {
+		// Nothing to do.
+	}
+}
+
+// On load: is there a local copy the cloud does not have?
+function checkLocalCopy(cloud) {
+	const mirror = readMirror();
+	if (!mirror) return;
+	if (shouldOfferRestore(mirror, cloud) === 'restore') {
+		restoreCandidate = mirror;
+		pendingRestore.set({ changedAt: mirror.changedAt, cloudUpdatedAt: cloud.updatedAt ?? null });
+	} else {
+		clearMirror();
+	}
+}
+
+export async function restoreLocalCopy() {
+	const mirror = restoreCandidate;
+	restoreCandidate = null;
+	pendingRestore.set(null);
+	if (!mirror?.data) return;
+	applyState(mirror.data);
+	changeCount++;
+	dirty = true;
+	// Re-base the copy on the cloud version just loaded, so it is offered
+	// again after another reload until a save is confirmed.
+	writeMirror();
+	await flushCloudState();
+}
+
+export function discardLocalCopy() {
+	restoreCandidate = null;
+	pendingRestore.set(null);
+	clearMirror();
+}
+
+// --- Saving ---
+
 function scheduleSave() {
 	if (hydrating || get(cloudPhase) !== 'ready') return;
 	dirty = true;
-	// Logging several exercises is one workout, not several independent saves.
-	// Save it as a batch when the session ends; this timer is only a safety net
-	// for an unfinished session or a history edit.
+	changeCount++;
+	writeMirror();
+	// Logging several exercises is one workout, so saves are debounced: the
+	// clock restarts with every change. Finishing the session saves at once.
 	syncStatus.set('pending');
-	syncMessage.set('Changes will save when you finish, or after a short pause.');
+	syncMessage.set('Saving shortly…');
 	clearTimeout(saveTimer);
 	saveTimer = setTimeout(() => flushCloudState(), IDLE_SAVE_DELAY_MS);
 }
 
+function putSnapshot(snapshot, signal) {
+	return requestJSON('/api/state', {
+		method: 'PUT',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ data: snapshot, expectedVersion: cloudVersion }),
+		signal
+	});
+}
+
+// A 409 usually means one of our own saves reached the database but its reply
+// was lost, so `cloudVersion` is behind. Read the cloud: if it holds data this
+// device sent, adopt its version. Returns the cloud state, or null for a real
+// conflict (data changed somewhere else).
+async function reconcileConflict(signal, isCurrent) {
+	const { response, body } = await requestJSON('/api/state', { signal, cache: 'no-store' });
+	if (response.status === 401) return { unauthorized: true };
+	if (!response.ok) throw new Error(body.error ?? 'Could not check the cloud copy.');
+	const ours =
+		unconfirmed.some((u) => deepEqual(u.snapshot, body.data)) ||
+		deepEqual(stateSnapshot(), body.data);
+	if (!ours || !isCurrent()) return null;
+	cloudVersion = body.version;
+	return body;
+}
+
+// Abandon a save that has outlived its deadline: a frozen timer, or an abort
+// that never settled. The next flush starts clean.
+function unstickSave() {
+	if (!saveInFlight || Date.now() - saveStartedAt < SAVE_TIMEOUT_MS) return false;
+	saveController?.abort();
+	saveGeneration++;
+	saveInFlight = false;
+	saveController = null;
+	dirty = true;
+	return true;
+}
+
 export async function flushCloudState() {
 	clearTimeout(saveTimer);
-	if (!browser || saveInFlight || !dirty || get(cloudPhase) !== 'ready') return;
+	if (!browser || !dirty || get(cloudPhase) !== 'ready') return;
+	if (saveInFlight && !unstickSave()) return;
+
+	const generation = ++saveGeneration;
+	const isCurrent = () => generation === saveGeneration;
+	const controller = new AbortController();
+	const deadline = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
+	saveController = controller;
 	saveInFlight = true;
+	saveStartedAt = Date.now();
 	dirty = false;
+	const changesAtStart = changeCount;
 	syncStatus.set('saving');
 
 	try {
 		const snapshot = stateSnapshot();
-		const { response, body } = await requestJSON('/api/state', {
-			method: 'PUT',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ data: snapshot, expectedVersion: cloudVersion })
-		});
+		unconfirmed = [...unconfirmed, { snapshot, print: fingerprint(snapshot) }].slice(
+			-MAX_UNCONFIRMED
+		);
+		let { response, body } = await putSnapshot(snapshot, controller.signal);
+
+		if (response.status === 409) {
+			const cloud = await reconcileConflict(controller.signal, isCurrent);
+			if (cloud?.unauthorized) {
+				response = { status: 401 };
+			} else if (cloud && deepEqual(cloud.data, snapshot)) {
+				// Already there: nothing left to send.
+				response = { ok: true, status: 200 };
+				body = { version: cloud.version, updatedAt: cloud.updatedAt };
+			} else if (cloud) {
+				({ response, body } = await putSnapshot(snapshot, controller.signal));
+			}
+		}
+		if (!isCurrent()) return;
+
 		if (response.status === 401) {
 			cloudPhase.set('login');
 			throw new Error('Your session expired. Sign in again before continuing.');
 		}
 		if (response.status === 409) {
+			dirty = true;
 			syncStatus.set('conflict');
 			syncMessage.set(body.error ?? 'Cloud data changed elsewhere. Reload before continuing.');
 			return;
 		}
 		if (!response.ok) throw new Error(body.error ?? 'Could not save changes.');
+
 		cloudVersion = body.version;
-		syncStatus.set('saved');
-		syncMessage.set('');
-	} catch (error) {
-		if (get(syncStatus) !== 'conflict') {
-			dirty = true;
-			syncStatus.set('error');
-			syncMessage.set(error?.message ?? 'Could not save changes.');
+		unconfirmed = [];
+		if (changeCount === changesAtStart) {
+			clearMirror();
+			syncStatus.set('saved');
+			syncMessage.set('');
+		} else {
+			// Changed while saving: keep the copy, now based on the new version.
+			writeMirror();
+			syncStatus.set('pending');
+			syncMessage.set('Saving shortly…');
 		}
+	} catch (error) {
+		if (!isCurrent()) return;
+		dirty = true;
+		syncStatus.set('error');
+		const timedOut = error?.name === 'AbortError';
+		const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+		syncMessage.set(
+			offline
+				? "Offline. Saved on this phone; it will save when you're back online."
+				: timedOut
+					? 'Save timed out. Saved on this phone; retrying shortly.'
+					: (error?.message ?? 'Could not save changes.')
+		);
 	} finally {
-		saveInFlight = false;
-		if (dirty && get(syncStatus) !== 'conflict' && get(cloudPhase) === 'ready') {
-			clearTimeout(saveTimer);
-			saveTimer = setTimeout(() => flushCloudState(), IDLE_SAVE_DELAY_MS);
+		clearTimeout(deadline);
+		if (isCurrent()) {
+			saveInFlight = false;
+			saveController = null;
+			if (dirty && get(syncStatus) !== 'conflict' && get(cloudPhase) === 'ready') {
+				clearTimeout(saveTimer);
+				saveTimer = setTimeout(() => flushCloudState(), IDLE_SAVE_DELAY_MS);
+			}
 		}
 	}
+}
+
+// Back in the foreground, back online, or restored from the page cache:
+// unstick a save frozen mid-request, then send anything unsaved.
+function resumeSync() {
+	if (get(cloudPhase) !== 'ready') return;
+	unstickSave();
+	if (dirty && get(syncStatus) !== 'conflict') void flushCloudState();
 }
 
 export function retryCloudSave() {
@@ -258,6 +449,7 @@ export function retryCloudSave() {
 		return;
 	}
 	dirty = true;
+	unstickSave();
 	flushCloudState();
 }
 
@@ -377,11 +569,15 @@ export function clearLegacyData() {
 
 for (const store of persistedStores) store.subscribe(scheduleSave);
 
-// Backgrounding a phone/browser is the other common way a workout is paused.
+// Backgrounding a phone is the other common way a workout is paused. Save on
+// the way out; on the way back in, retry anything the freeze interrupted.
 if (browser) {
 	document.addEventListener('visibilitychange', () => {
 		if (document.visibilityState === 'hidden') void flushCloudState();
+		else resumeSync();
 	});
+	window.addEventListener('pageshow', resumeSync);
+	window.addEventListener('online', resumeSync);
 }
 
 // --- Sessions and records ---
