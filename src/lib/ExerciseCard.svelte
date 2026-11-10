@@ -1,8 +1,8 @@
 <script>
 	import { slide } from 'svelte/transition';
-	import { KIND_LABELS } from './prescribe.js';
-	import { MAX_SETS } from './bands.js';
-	import TotalBar from './TotalBar.svelte';
+	import { KIND_LABELS, repsLabel, lastLine } from './prescribe.js';
+	import { formatSession } from './sessions.js';
+	import SetBars from './SetBars.svelte';
 
 	let {
 		slot, exercise, variants = [], choices = [], prescription,
@@ -30,23 +30,20 @@
 	let loadArrow = $derived(dir?.move === 'load' ? (tone === 'back-off' ? '↓' : '↑') : '');
 	let repsArrow = $derived(dir?.move === 'reps' ? '↑' : '');
 
-	// Weight and total — the two things worth reading at a glance. Nothing else
+	// Weight and reps — the two things worth reading at a glance. Nothing else
 	// on the card gets this size. After topping the range the app cannot know the
 	// next weight on this machine, so it asks for more than last time.
 	let loadText = $derived.by(() => {
 		if (prescription?.targetLoad == null) return '—';
 		return `${prescription.loadUp ? '> ' : ''}${prescription.targetLoad}${loadArrow}`;
 	});
-	let repsText = $derived(
-		prescription?.targetReps == null
-			? `${prescription?.targetLow}-${prescription?.targetHigh}`
-			: `${prescription.targetReps}${repsArrow}`
-	);
+	let repsText = $derived(`${repsLabel(prescription)}${repsArrow}`);
+	let setsText = $derived(`reps · ${prescription?.sets ?? exercise.sets} sets`);
 
-	let loggedText = $derived(loggedToday ? `${loggedToday.weight}kg × ${loggedToday.total}` : '');
-	let lastText = $derived(
-		prescription?.last ? `last ${prescription.last.weight} × ${prescription.last.total}` : null
-	);
+	let loggedText = $derived(loggedToday ? formatSession(loggedToday) : '');
+	let lastText = $derived(lastLine(prescription));
+	// Built-in swaps show as chips, the recommended pick first.
+	let builtIn = $derived(variants.filter((v) => !v.isCustom));
 
 	let accent = $derived(
 		tone === 'back-off' ? 'text-amber' : tone === 'hold' ? 'text-text-dim' : 'text-accent'
@@ -87,6 +84,7 @@
 			<div class="flex items-start gap-2 mb-3">
 				<h3 class="t-title font-semibold flex-1 min-w-0">
 					{exercise.name}
+					{#if slot?.tag}<span class="t-label {slot.tag === 'heavy' ? 'text-accent' : 'text-text-muted'} ml-1">{slot.tag}</span>{/if}
 					{#if exercise.isCustom}<span class="t-label text-accent/70 ml-1">mine</span>{/if}
 				</h3>
 				<button onclick={() => (pickerOpen = !pickerOpen)} aria-label="Which station"
@@ -112,8 +110,8 @@
 						</div>
 						<span class="t-display font-mono text-text-dim/50">×</span>
 						<div>
-							<div class="t-display font-mono font-bold tabular-nums text-success">{loggedToday.total}</div>
-							<div class="t-label text-text-muted">total reps</div>
+							<div class="t-display font-mono font-bold tabular-nums text-success">{loggedToday.reps?.join(', ') ?? loggedToday.total}</div>
+							<div class="t-label text-text-muted">reps</div>
 						</div>
 					{:else}
 						<div class="t-display font-mono font-bold text-text-dim">—</div>
@@ -133,7 +131,20 @@
 					</button>
 				</div>
 			{:else}
-			<!-- Each band keeps its own weight and its own total. -->
+			<!-- Which station: the recommended pick (★) first. Each keeps its own history. -->
+			{#if builtIn.length > 1}
+				<div class="flex flex-wrap gap-1.5 mb-3">
+					{#each builtIn as v (v.id)}
+						{@const on = v.id === exercise.id}
+						<button onclick={() => onSelectVariant?.(v.id)} aria-pressed={on}
+							class="px-2.5 py-1.5 rounded-lg border t-body transition-colors {on ? 'bg-accent/10 border-accent/40 text-accent' : 'bg-bg border-border text-text-dim'}">
+							{v.isPrimary ? '★ ' : ''}{v.name}
+						</button>
+					{/each}
+				</div>
+			{/if}
+
+			<!-- Each band keeps its own weight and its own history. -->
 			{#if choices.length > 1}
 				<div class="grid gap-1.5 mb-3.5" style="grid-template-columns: repeat({choices.length}, minmax(0, 1fr))">
 					{#each choices as c (c.band)}
@@ -149,7 +160,7 @@
 				</div>
 			{/if}
 
-			<!-- The instruction: weight × total. Nothing else at this size. -->
+			<!-- The instruction: weight × reps. Nothing else at this size. -->
 			<button onclick={() => !preview && onTap?.()} disabled={preview} class="w-full text-left disabled:cursor-default">
 				<div class="flex items-baseline gap-2.5 mb-3">
 					<div>
@@ -159,7 +170,7 @@
 					<span class="t-display font-mono text-text-dim/50">×</span>
 					<div>
 						<div class="t-display font-mono font-bold tabular-nums {repsArrow ? accent : 'text-text'}">{repsText}</div>
-						<div class="t-label text-text-muted">total reps</div>
+						<div class="t-label text-text-muted">{setsText}</div>
 					</div>
 					<span class="t-label ml-auto flex-shrink-0 text-right {accent}">
 						{KIND_LABELS[prescription?.kind] ?? ''}
@@ -167,7 +178,7 @@
 				</div>
 
 				{#if dir}
-					<TotalBar lo={dir.total.lo} hi={dir.total.hi} from={dir.total.from} to={dir.total.to} {tone} />
+					<SetBars lo={dir.bars.lo} hi={dir.bars.hi} from={dir.bars.from} to={dir.bars.to} sets={prescription.sets} {tone} />
 				{/if}
 
 				<!-- Only where a bare number would be confusing on its own. -->
@@ -176,9 +187,9 @@
 				{/if}
 			</button>
 
-			<!-- The one rule that goes with a total. -->
+			<!-- How hard: the one rule that goes with every set. -->
 			<p class="mt-3 px-2.5 py-2 rounded-lg bg-accent/5 border border-accent/25 t-meta text-accent">
-				No more than {MAX_SETS} sets to reach this
+				{exercise.effort ?? 'Stop 1-2 reps short'}
 			</p>
 
 			{#if preview}
@@ -200,7 +211,7 @@
 
 			<!-- How to do it, not why we picked it: the numbers are the instruction,
 			     and an explanation of them was just something else to read. -->
-			{#if exercise.notes || exercise.effort || exercise.rest}
+			{#if exercise.notes || exercise.rest}
 				<button onclick={() => (notesOpen = !notesOpen)} class="t-label text-text-muted mt-2 hover:text-text-dim">
 					{notesOpen ? '− how to do it' : '+ how to do it'}
 				</button>
@@ -210,12 +221,9 @@
 					{#if exercise.notes}
 						<p class="t-body text-text-muted">{exercise.notes}</p>
 					{/if}
-					<!-- The programme's own prescription: not on the face, but it is the
-					     only place rest and effort are written down. -->
-					{#if exercise.effort || exercise.rest}
-						<p class="t-label text-text-muted">
-							{[exercise.effort, exercise.rest && `${exercise.rest} rest`].filter(Boolean).join(' · ')}
-						</p>
+					<!-- Rest is not on the face; this is the only place it is written down. -->
+					{#if exercise.rest}
+						<p class="t-label text-text-muted">{exercise.rest} rest</p>
 					{/if}
 				</div>
 			{/if}

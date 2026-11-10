@@ -1,25 +1,22 @@
 // Rep bands and how a session is scored.
 //
-// A session is one number per exercise: the weight, and the total reps you
-// reached at it across as many sets as you needed (no more than MAX_SETS).
-// Every set is taken to failure, so the set count follows from fatigue rather
-// than being chosen up front.
+// A session is a fixed number of sets (the programmed `sets`), each stopping
+// 1-2 reps short of failure. Each set has a per-set rep range, and the band
+// says which range: Low for the two heavy lifts a day, Normal or High for
+// everything else.
 //
-// The band is *declared*, not derived. When sets were fixed at three, reps per
-// set told you the band. With a free set count they do not: 25 reps as five
-// sets of five would read as heavy work. So the band you pick on the card is
-// the band the session is filed under.
+// The band is *declared*, not derived: the band picked on the card (or the
+// slot's own) is the band the session is filed under, so a heavy day and a
+// light day of the same movement keep separate histories.
 //
 // Keys stay 'heavy' / 'moderate' / 'volume' because every stored entry already
 // carries them. Only the labels changed.
 
-export const MAX_SETS = 5;
-
-// `perSet` is the rep range a band's default target is built from: the total
-// range is programme sets × perSet. `step` is how many total reps a session
-// adds while inside the range — bigger totals move in bigger steps.
+// `perSet` is the default per-set range, used when a band is not the one the
+// programme wrote a range for. `min`/`max` only classify old rows logged
+// before bands were declared. `step` is kept for old total-rep rows.
 export const BANDS = {
-	heavy: { key: 'heavy', label: 'LOW', min: 1, max: 5, perSet: [3, 5], step: 1 },
+	heavy: { key: 'heavy', label: 'LOW', min: 1, max: 5, perSet: [4, 8], step: 1 },
 	moderate: { key: 'moderate', label: 'NORMAL', min: 6, max: 15, perSet: [8, 12], step: 2 },
 	volume: { key: 'volume', label: 'HIGH', min: 16, max: Infinity, perSet: [16, 20], step: 3 }
 };
@@ -69,7 +66,8 @@ export function bucketFor(entry, eligible) {
 
 // --- Scoring ---
 
-// A session ranks by weight × total reps within its band. At the same weight
+// A session ranks by weight × total reps within its band (for a set-by-set
+// session, the reps of every set at its main weight). At the same weight
 // more reps wins; at the same total a heavier weight wins.
 export function sessionScore(weight, total) {
 	return (Number(weight) || 0) * (Number(total) || 0);
