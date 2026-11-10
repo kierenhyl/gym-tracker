@@ -1,15 +1,21 @@
 import { writable, derived, get } from 'svelte/store';
 import { browser } from '$app/environment';
-import { program, exerciseIndex, movementForId, movementName } from './program.js';
-import { withTrainingModel, bandConfigFor, structureFor, GUARDRAIL_EXEMPT_MUSCLES } from './training.js';
+import { program, exerciseIndex, movementForId, movementName, slotVariants } from './program.js';
+import {
+	withTrainingModel,
+	bandConfigFor,
+	structureFor,
+	indirectMusclesFor,
+	INDIRECT_WEIGHT
+} from './training.js';
 import { BANDS, bucketFor, bandLabel, repsOf } from './bands.js';
 import { prescribe, isStalled, sessionsInBand } from './prescribe.js';
-import { toSessions } from './sessions.js';
+import { toSessions, formatSession } from './sessions.js';
 import { deepEqual, fingerprint, shouldOfferRestore } from './sync.js';
 
 // --- Config ---
 export const STALE_DAYS = 14;
-export const PROGRAM_VERSION = 2;
+export const PROGRAM_VERSION = 3;
 export const WEEKLY_SETS_MIN = 10;
 export const WEEKLY_SETS_MAX = 20;
 
@@ -103,7 +109,7 @@ function migrateLog(log) {
 		const def = exerciseIndex[entry.exerciseId];
 		const structure = entry.structure ?? structureFor(entry.method ?? def?.method);
 		const next = { ...entry, movement, structure };
-		next.bucket = bucketFor(next, bandConfigFor(movement, def?.repRange, def?.sets).bands);
+		next.bucket = bucketFor(next, bandConfigFor(movement, def?.repRange, def?.sets, def?.band).bands);
 		if (entry.rir == null) next.legacy = true;
 		return next;
 	});
@@ -600,7 +606,8 @@ function configForEntry(entry) {
 	return bandConfigFor(
 		movementOf(entry),
 		entry.targetRepRange ?? def?.repRange,
-		entry.targetSets ?? def?.sets
+		entry.targetSets ?? def?.sets,
+		def?.band
 	);
 }
 
@@ -612,7 +619,7 @@ export function sessionsOf(log) {
 
 export const sessions = derived(workoutLog, sessionsOf);
 
-// Best per movement+band, by weight × total reps.
+// Best per movement+band, by weight × total reps (sets at the main weight).
 export const records = derived(sessions, ($sessions) => {
 	const recs = {};
 	for (const s of $sessions) {
@@ -645,11 +652,12 @@ export function historyForMovement(allSessions, movement) {
 	return allSessions.filter((s) => s.movement === movement);
 }
 
-// One chip per band on the card: its range, and the weight you last used in it.
+// One chip per band on the card: its per-set range, and the weight you last
+// used in it.
 export function bandChoices(allSessions, exercise) {
 	const history = historyForMovement(allSessions, exercise.movement);
 	return exercise.bands.map((band) => {
-		const [lo, hi] = exercise.targetTotals[band];
+		const [lo, hi] = exercise.ranges[band];
 		const last = sessionsInBand(history, band).at(-1);
 		return { band, label: BANDS[band].label, lo, hi, lastWeight: last?.weight ?? null };
 	});
@@ -661,13 +669,15 @@ export function customVariantsFor(custom, slotId) {
 	return custom?.[slotId] ?? [];
 }
 
-// The programme has no built-in alternatives, so the only swaps are the ones
-// created here — gym-specific stations whose loads are not comparable.
+// The recommended (★) pick first, then the programme's built-in alternatives,
+// then your own gym-specific stations. Each has its own movement key, so its
+// own history.
 export function slotVariantsWithCustom(slot, custom) {
-	const primary = withTrainingModel({ ...slot, isPrimary: true });
+	const builtIn = slotVariants(slot).map((v) => withTrainingModel(v));
+	const { alternatives: _ignored, ...base } = slot;
 	const customs = customVariantsFor(custom, slot.id).map((c) =>
 		withTrainingModel({
-			...slot,
+			...base,
 			id: c.id,
 			movement: c.movement,
 			name: c.name,
@@ -677,7 +687,7 @@ export function slotVariantsWithCustom(slot, custom) {
 			basedOn: c.basedOn ?? slot.movement
 		})
 	);
-	return [primary, ...customs];
+	return [...builtIn, ...customs];
 }
 
 export function getActiveVariant(slot, selections, custom) {
@@ -744,7 +754,9 @@ export function referenceFor(allSessions, slot, exercise, band, custom) {
 		.filter((m) => m && m !== exercise.movement);
 	const theirs = allSessions.filter((s) => siblings.includes(s.movement));
 	const pick = theirs.filter((s) => s.band === band).at(-1) ?? theirs.at(-1);
-	return pick ? { name: displayName(pick.movement), weight: pick.weight, total: pick.total } : null;
+	return pick
+		? { name: displayName(pick.movement), weight: pick.weight, text: formatSession(pick) }
+		: null;
 }
 
 export function prescriptionFor(allSessions, slot, exercise, band, readiness = 'normal', custom) {
@@ -761,19 +773,52 @@ export function prescriptionFor(allSessions, slot, exercise, band, readiness = '
 
 // --- Fatigue guardrails ---
 
-// Programmed hard sets per muscle over the last 7 days. Legs are excluded: one
-// exercise per day is the programme's deliberate recovery choice, not an
-// accident to be flagged.
-export function weeklySetsByMuscle(history, days = 7) {
-	const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// The muscle a logged row trained directly, and the movement whose indirect
+// work it carries. A custom variant counts like the movement it replaces.
+function rowMuscles(entry, custom) {
+	const def = exerciseIndex[entry.exerciseId];
+	const mine = def
+		? null
+		: Object.values(custom ?? {})
+				.flat()
+				.find((v) => v.id === entry.exerciseId);
+	const muscle = entry.muscle ?? def?.muscle ?? mine?.muscle ?? null;
+	const movement = mine?.basedOn ?? def?.movement ?? movementOf(entry);
+	return { muscle, indirect: indirectMusclesFor(movement, muscle) };
+}
+
+function addSets(totals, muscle, indirect, sets) {
+	if (muscle) totals[muscle] = (totals[muscle] ?? 0) + sets;
+	for (const m of indirect) totals[m] = (totals[m] ?? 0) + sets * INDIRECT_WEIGHT;
+}
+
+// Hard sets per muscle over the last 7 days, from the sets you actually
+// logged: a direct set counts 1, an indirect set 0.5. Only set-by-set rows
+// count; an exercise you didn't log adds nothing.
+export function weeklySetsByMuscle(log, custom, days = 7, now = Date.now()) {
+	const cutoff = now - days * DAY_MS;
+	const totals = {};
+	for (const entry of log) {
+		if (entry.format !== 'set' || !(entry.reps > 0)) continue;
+		if (new Date(entry.date).getTime() < cutoff) continue;
+		const { muscle, indirect } = rowMuscles(entry, custom);
+		addSets(totals, muscle, indirect, 1);
+	}
+	return totals;
+}
+
+// What the programme planned for the sessions finished in the same window,
+// counted the same way. Logging fewer sets than this means sets were missed.
+export function plannedSetsByMuscle(history, days = 7, now = Date.now()) {
+	const cutoff = now - days * DAY_MS;
 	const totals = {};
 	for (const session of history) {
+		if (session.programVersion !== PROGRAM_VERSION) continue;
 		if (new Date(session.date).getTime() < cutoff) continue;
-		const day = program[session.dayIndex];
-		if (!day) continue;
-		for (const slot of day.exercises) {
-			if (GUARDRAIL_EXEMPT_MUSCLES.has(slot.muscle)) continue;
-			totals[slot.muscle] = (totals[slot.muscle] ?? 0) + (slot.sets ?? 0);
+		for (const slot of program[session.dayIndex]?.exercises ?? []) {
+			addSets(totals, slot.muscle, indirectMusclesFor(slot.movement, slot.muscle), slot.sets);
 		}
 	}
 	return totals;
@@ -782,6 +827,7 @@ export function weeklySetsByMuscle(history, days = 7) {
 export function stalledMovements(allSessions) {
 	const byKey = new Map();
 	for (const s of allSessions) {
+		if (!s.perSet) continue;
 		const key = recordKey(s.movement, s.band);
 		if (!byKey.has(key)) byKey.set(key, []);
 		byKey.get(key).push(s);
@@ -798,7 +844,7 @@ export function stalledMovements(allSessions) {
 export function exerciseProgress(allSessions, key) {
 	return allSessions
 		.filter((s) => recordKey(s.movement, s.band) === key)
-		.map((s) => ({ date: s.date, weight: s.weight, total: s.total }));
+		.map((s) => ({ date: s.date, weight: s.weight, total: s.total, text: formatSession(s) }));
 }
 
 function walkPRs(allSessions, onPR) {
@@ -904,29 +950,37 @@ export function recordLabel(key) {
 
 // --- Actions ---
 
-// One row per exercise: the weight and the total reps reached at it. The band
-// is the one picked on the card, stored rather than derived. Range and set
-// count are stored too, so a custom variant's row can still be filed.
-export function logSession(exercise, { weight, total, band }, opts = {}) {
-	const w = parseFloat(weight);
-	const t = parseInt(total);
-	if (!(w > 0) || !(t > 0) || !exercise) return;
+// One row per set, sharing a setGroupId: the stored shape sessions.js reads as
+// one session. The band is the one picked on the card, stored rather than
+// derived. Range, set count and muscle are stored too, so a custom variant's
+// rows can still be filed and counted. Sets with no reps are skipped.
+export function logSession(exercise, { sets, band }, opts = {}) {
+	if (!exercise) return;
+	const rows = (sets ?? [])
+		.map((s) => ({ weight: parseFloat(s.weight), reps: parseInt(s.reps) }))
+		.filter((s) => s.weight > 0 && s.reps > 0);
+	if (rows.length === 0) return;
+	const date = new Date().toISOString();
+	const setGroupId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 	workoutLog.update(($log) => [
 		...$log,
-		{
-			format: 'total',
-			date: new Date().toISOString(),
+		...rows.map((s, setIndex) => ({
+			format: 'set',
+			date,
 			exerciseId: exercise.id,
 			movement: exercise.movement,
+			muscle: exercise.muscle ?? null,
 			structure: 'straight',
-			weight: w,
-			reps: t,
+			weight: s.weight,
+			reps: s.reps,
 			band,
 			bucket: band,
+			setGroupId,
+			setIndex,
 			readiness: opts.readiness ?? null,
 			targetSets: exercise.sets ?? null,
 			targetRepRange: exercise.repRange ?? null
-		}
+		}))
 	]);
 }
 
@@ -941,7 +995,8 @@ export function editLogEntry(entry, weight, reps) {
 			if (e !== entry) return e;
 			if (e.totalReps != null) return { ...e, weight: w, totalReps: r };
 			const next = { ...e, weight: w, reps: r };
-			if (e.format !== 'total') next.bucket = bucketFor({ ...next, bucket: null }, configForEntry(next).bands);
+			// Old set rows file by reps; total and per-set rows declare their band.
+			if (e.format == null) next.bucket = bucketFor({ ...next, bucket: null }, configForEntry(next).bands);
 			return next;
 		})
 	);

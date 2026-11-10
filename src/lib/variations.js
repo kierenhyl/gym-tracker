@@ -6,9 +6,9 @@
 // different machine keeps its own records. That is the point: two cable
 // stations wired differently are not the same load.
 //
-// Deliberately not in `program.js`: `verify-program.js` asserts every exercise
-// has zero `alternatives`, and the programme should stay a statement of what
-// you train, not what you might substitute.
+// The programme's own recommended swaps live in `program.js` as built-in
+// `alternatives`. These are extra suggestions for a busy gym; one with the
+// same name as a variant already in the picker is not suggested again.
 //
 // Nothing here is heavy-eligible. A custom variant's movement key never
 // appears in `HEAVY_ELIGIBLE` (training.js), which is correct — heavy work is

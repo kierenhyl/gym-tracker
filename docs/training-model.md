@@ -1,141 +1,188 @@
 # Training model
 
-Why the app tracks what it tracks. This is the reasoning behind `bands.js`,
-`sessions.js`, `prescribe.js` and `training.js`. Read it before changing any
-of the numbers below.
+Why the app tracks what it tracks. This is the reasoning behind `program.js`,
+`bands.js`, `sessions.js`, `prescribe.js` and `training.js`. Read it before
+changing any of the numbers below.
 
-## One number per exercise
+## Why it changed (programme version 3)
 
-Each exercise has one target: a weight and a **total** number of reps, for
-example `80kg × 25`. You reach the total in as many sets as you need, up to
-five. Every set goes to failure, so the set count follows from fatigue on the
-day rather than from a plan.
+The previous model took every set to failure and chased one total-rep number
+per exercise, in up to five sets. The research doesn't support either rule:
 
-This replaced a fixed `weight × reps × sets` target (`80 × 9 × 3`), where
-progress was judged on the best single set.
+- **Failure isn't needed.** Sets taken close to failure grow muscle about as
+  well as sets taken to failure, with less fatigue to recover from. Stopping
+  1-2 reps short keeps the stimulus and makes the next set, and the next
+  session, better.
+- **The rep range is wide.** Anywhere from about 5 to 30 reps per set builds
+  muscle when the set ends close to failure. Heavier sets (4-8 reps) build
+  strength more; the rest of the session can live at 8-20.
+- **Volume is counted in hard sets.** About 10-20 hard sets per muscle per week
+  is the useful range. Beyond about 11 sets for one muscle in one session,
+  extra sets add little: spread them across the week.
+- **Frequency helps strength more than size.** Training a lift twice a week
+  mostly pays off in strength, so the main lifts appear twice per cycle: once
+  heavy, once light.
 
-### The set cap
+A fixed set count also makes the numbers comparable. "Up to five sets to reach
+a total" let a total grow by adding sets rather than strength.
 
-The card and the log sheet both say **"No more than 5 sets to reach this"**
-(`MAX_SETS` in `bands.js`). Without it, a total can grow by adding sets rather
-than strength. At failure, reps drop with every set: `9, 7, 5, 3, 2, 2, 1` is 29,
-but sets five to seven add 5 reps of endurance, not strength.
+## The rules
 
-Sets are not logged, so the app cannot check the cap. It is a rule you keep.
+- Every set stops **1-2 reps short of failure**. The last set of an isolation
+  exercise may go to failure.
+- Each exercise has a **fixed number of sets**: the programmed `sets`.
+- **Heavy days** (days 1-3) start with **2 heavy lifts**: 4-8 reps, about
+  80-85% of 1RM, stopping 2 short. Everything else is 8-20 reps.
+- **Light days** (days 4-5) repeat the main movements in a higher range.
+
+## The programme
+
+★ is the recommended variation; the alternatives ship as built-in swaps.
+**H** marks a heavy slot (Low band).
+
+| Day | Exercises |
+|---|---|
+| 1 · Push heavy | H Smith bench 3 × 4-6 · H Hack squat 3 × 5-8 · Cable lateral raise 3 × 12-20 · Overhead cable triceps 3 × 10-15 · Cable crunch 2 × 10-15 |
+| 2 · Pull heavy | H Chest-supported row 3 × 5-8 · H Neutral-grip pulldown 3 × 6-10 · Seated ham curl 3 × 8-12 · Reverse pec deck 3 × 12-20 · Bayesian curl 3 × 10-15 |
+| 3 · Shoulders & legs | H Machine shoulder press 3 × 5-8 · H Leg press 3 × 5-8 · Machine incline press 3 × 8-12 · Cable lateral raise 3 × 12-20 · Rope pushdown 2 × 10-15 · Cable crunch 2 × 10-15 |
+| 4 · Pull light & legs | Neutral-grip pulldown 3 × 10-15 · Machine row 3 × 10-15 · Leg extension 3 × 10-15 · Seated ham curl 3 × 10-15 · Incline DB curl 3 × 10-15 · Reverse cable crossover 2 × 12-20 |
+| 5 · Push light | Smith bench 3 × 8-12 · Hack squat 2 × 10-15 · Pec deck 2 × 12-20 · Cable lateral raise 3 × 12-20 · Overhead cable triceps 2 × 10-15 · Standing calf raise 3 × 8-15 · Ab crunch machine 2 × 10-15 |
+
+Weekly direct sets: chest 11, back 12, quads 11, side delts 9, triceps 7,
+biceps 6, hamstrings 6, rear delts 5, abs 6, calves 3, front delts 3. 79 in
+total. No muscle gets more than 11 direct sets in one session.
+
+`verify-program.js` asserts the table, two heavy slots first on each heavy
+day and none on light days, every heavy slot (alternatives included) on a
+heavy-eligible setup, the weekly totals and the per-session cap.
 
 ## Bands
 
-| Band | Key | Default per-set range | Step per session |
-|---|---|---|---|
-| Low | `heavy` | 3-5 | +1 |
-| Normal | `moderate` | 8-12 | +2 |
-| High | `volume` | 16-20 | +3 |
+| Band | Key | Default per-set range |
+|---|---|---|
+| Low | `heavy` | 4-8 |
+| Normal | `moderate` | 8-12 |
+| High | `volume` | 16-20 |
 
 The keys predate the labels and stay as they are, because every stored row
 already carries them.
 
-**The band is picked, not worked out.** With three fixed sets, reps per set
-told you the band. With a free set count they do not: 25 reps as five sets of
-five would read as low-rep work. So the card has a chip per band, and the band
-you pick is the band the session is saved under. Unpicked, a card uses the band
-its programmed range sits in. The pick lasts for the day.
+**The band is declared, not worked out.** A heavy slot says `band: 'heavy'`,
+so hack squat at 5-8 is Low even though 5-8 would otherwise read as Normal.
+Other slots use the band their range sits in. The band picked on the card (a
+chip per band) is the band the session is saved under, for the day.
 
-Each band keeps its own weight and its own history. A chip shows the weight you
-last used in that band.
+**Heavy and light are the same movement in different bands.** Day 1's Smith
+bench (Low, 4-6) and day 5's (Normal, 8-12) share the movement key
+`smith-bench-press`, so they share records per band but keep separate
+histories and separate targets.
 
-### Total-rep ranges
+The programmed band uses the programmed range. Other bands use the default.
+If a slot's band isn't allowed on the variant you picked (a custom variant on
+a heavy slot), it falls back to Normal with the Normal default range.
 
-A band's range is **programme sets × per-set range**. Smith bench is programmed
-3 × 6-10, so:
+## Progression: double progression, set by set
 
-| Band | Range |
-|---|---|
-| Low | 3 × 3-5 = 9-15 |
-| Normal | 3 × 6-10 = 18-30 |
-| High | 3 × 16-20 = 48-60 |
-
-The band the programme's own range sits in uses that range as written, not the
-band default. Lateral raise is 3 × 12-20, which sits in High, so its High range
-is 36-60, not 48-60.
-
-## Progression
-
-Double progression, on the total. Target and history both come from your
-**last session in this band on this variant**, never from an all-time best.
+Target and history both come from your **last session in this band on this
+variant**, logged under this model.
 
 | Last session in this band | Today |
 |---|---|
 | None | Set a baseline: pick a weight, aim for the range |
-| At or over the top | **Add weight.** Anything over last time; the total goes back to the bottom |
-| Inside the range | Same weight, last total + step, capped at the top |
-| Under the bottom, once | Same weight, aim for the bottom. Normal right after a weight jump |
+| Every set at or above the top, first time at this weight | **Same weight, hit it once more** |
+| Every set at the top, 2 sessions in a row at this weight | **Add weight.** Anything over last time; every set aims for the bottom |
+| Inside the range | Same weight, +1 rep on any set below the top |
+| Under the bottom, once | Same weight, aim for the bottom on every set. Normal right after a weight jump |
 | Under the bottom, twice at that weight | Drop about 10% |
 | No gain in 3 sessions at one weight | Deload about 10% |
-| Rough day (readiness) | Match last session instead of adding weight or reps |
+| Rough day (readiness) | Match last session, set by set |
 
-Worked example, Normal (18-30):
+"Under the bottom" means the **average** reps per set is below the bottom of
+the range. One tired last set doesn't count as a miss on its own.
+
+Confirming the top once before adding weight stops one good day from forcing
+a jump the next session can't hold.
+
+Worked example, heavy Smith bench (3 × 4-6):
 
 | Session | Target | Did | Next |
 |---|---|---|---|
-| 1 | 80 × 25 | 26 | 80 × 28 |
-| 2 | 80 × 28 | 28 | 80 × 30 |
-| 3 | 80 × 30 | 31 | more than 80 × 18 |
-| 4 | 82.5 × 18 | 19 | 82.5 × 21 |
+| 1 | 80 × 4-6 (baseline) | 6, 5, 4 | 80 × 6, 6, 5 |
+| 2 | 80 × 6, 6, 5 | 6, 6, 6 | 80 × 6 (once more) |
+| 3 | 80 × 6 | 6, 7, 6 | more than 80 × 4 |
+| 4 | 82.5 × 4 | 4, 3, 3 | 82.5 × 4 (repeat) |
 
-`scripts/verify-program.js` checks every row of that table.
+`scripts/verify-program.js` checks every rule above with worked examples.
 
 ### The weight is typed, never assumed
 
 Machines and stacks step differently, so the app never works out the next
-weight. After topping the range the card shows `> 80↑` and the log sheet's
-weight field starts empty. Whatever you type becomes the new rung. Totals are
-only compared at the same weight.
+weight. After topping the range twice the card shows `> 80↑` and the log
+sheet's weight fields start empty. The first weight you type fills the sets
+you haven't changed. Whatever you type becomes the new rung.
 
-### No effort question
+### The log sheet
 
-Every set goes to failure, so "how close to failure?" always has the same
-answer. The old engine used it to decide when to add weight. Now, reaching the
-top of the range is the whole signal.
+One row per set, pre-filled with today's target weight and reps. You only
+change a number you missed. Clear a set's reps to skip it. Below the rows,
+the sheet says what the sets mean for next time, by the same rules that set
+today's target: `next time 80 × 6, 6, 5`, `top of the range: hit it once more
+next time`, or `under 4: same weight next time`.
 
-### The log sheet previews next time
+## History from before this model
 
-Type a total and the sheet says what it means, using the same rules that set
-today's target: `next time 27`, `top of the range: go up a weight next time`,
-or `under 18: same weight next time`.
+Nothing stored is rewritten. `sessions.js` reads three shapes:
 
-## Records
+- **Per-set rows** (`format: 'set'`, sharing a `setGroupId`): the current
+  model. Band declared, reps kept in set order. Only these drive progression.
+- **Total rows** (`format: 'total'`): the previous model, one weight and a
+  total reached with every set to failure.
+- **Older set-by-set rows**: grouped by `setGroupId`, or by movement and day.
+  Total = the reps of every set at the main weight; weight = the one most sets
+  used; band = the average reps per set, snapped to an allowed band. Old
+  myo-rep rows carry their whole effort in `totalReps`.
 
-A best is per movement and band, ranked by **weight × total**. At the same
-weight, more reps wins. At the same total, a heavier weight wins.
-
-The best is not on the card. The card is today's job; the best is history.
-The two often disagree on purpose: after `80 × 31`, the next target is
-`82.5 × 18`, which is progress but below the best. Bests live in the history
-sheet and on the Stats tab.
-
-The Stats tab charts **working weight** per movement and band. It rises only
-when a range is topped, so it is the cleanest line of progress. The reps inside
-a rung show on the "now" line.
-
-## History logged set by set
-
-Nothing stored is rewritten. `sessions.js` reads the log and returns one row
-per session, whichever way it was logged:
-
-- **Logged as a total** (`format: 'total'`): one row, used as it is.
-- **Logged set by set**: rows sharing a `setGroupId` are one session. Rows from
-  before grouping existed are grouped by movement and day.
-  - **Total**: the reps of every set at the main weight, added up. `9, 8, 7`
-    is 24.
-  - **Weight**: the weight most sets used, the heaviest on a tie. A lighter
-    back-off set does not count towards the total.
-  - **Band**: the average reps per set, snapped to a band the exercise allows.
-- **Old myo-rep rows** already carried the whole effort in `totalReps`, so
-  that is the total. They go to the exercise's default band, because their
-  reps per set say nothing about the band they aimed at.
+The two old shapes still show in history and still count for records. But
+their sets went to failure, so a "+1 rep" target built on them would push you
+back to failure. When a variant and band has no per-set session yet, the card
+shows the old one as a reference (`last: 80 × 25 total`, or
+`last: 80 × 9, 8, 7 (old)`) and today is a baseline.
 
 A backup taken before this change restores cleanly, because the stored shape
 of old rows never changed.
+
+## Records
+
+A best is per movement and band, ranked by **weight × total reps** (for a
+per-set session, the reps of every set at its main weight). At the same
+weight, more reps wins. At the same total, a heavier weight wins. Old
+total-rep sessions keep their records.
+
+The best is not on the card. The card is today's job; the best is history.
+Bests live in the history sheet and on the Stats tab.
+
+The Stats tab charts **working weight** per movement and band. It rises only
+when a range is topped, so it is the cleanest line of progress.
+
+## Weekly sets per muscle (Stats)
+
+Counted from the sets you actually **logged** in the last 7 days, not the
+programmed sets. An exercise you didn't log adds nothing.
+
+- A direct set counts 1 towards the exercise's muscle.
+- An indirect set counts 0.5: pressing for triceps and front delts, rows and
+  pulldowns for biceps and rear delts, hack squat and leg press for glutes
+  (`INDIRECT_MUSCLES` in `training.js`).
+- Legs are included.
+
+The bars show the 10-20 range. The alert fires only when a muscle is **over
+20**, or **under what the sessions you finished this week planned** (you
+missed sets). It does not fire for being under 10 on its own: the programme
+doses some muscles below 10 on purpose (calves 3, abs 6, hamstrings 6), and
+an alert that is always on stops meaning anything.
+
+Old total-rep rows don't record sets, so they don't count. The first week
+after the switch reads low until a full cycle is logged.
 
 ## Low-rep eligibility is a safety rule
 
@@ -143,37 +190,14 @@ The Low band is offered only where the setup is stable and a near-maximal
 effort does not depend on stabiliser fatigue or spinal position. See
 `HEAVY_ELIGIBLE` in `training.js`.
 
-**Allowed (8 of 26):** smith bench press, machine shoulder press, machine
-incline press, chest-supported row, machine row, neutral-grip pulldown, hack
-squat, machine hip thrust.
+**Allowed:** Smith bench press, machine chest press, machine shoulder press,
+Smith shoulder press, machine incline press, chest-supported row, machine row,
+neutral-grip pulldown, wide-grip pulldown, hack squat, leg press, belt squat,
+machine hip thrust.
 
-**Normal and High only:** everything else — all dumbbell work (stabiliser
-limited), all cable isolation, the half-kneeling pulldown (unstable by design),
-leg extension and seated hamstring curl (knee and hamstring risk under
-near-maximal load), Pallof press (an anti-rotation drill, not a loadable lift).
-
-## Myo-reps are retired
-
-Twelve slots used to be myo-reps: an activation set, then mini-sets with 15
-seconds' rest. A total with every set to failure does the same job with one
-rule instead of two, so the programme no longer has a `method` field.
-`verify-program.js` asserts that. Old myo-rep sessions keep their totals (see
-above).
-
-## Legs
-
-The programme still has one leg exercise per day, asserted by
-`verify-program.js`. It no longer forces one hard set: leg exercises are
-programmed at 3 sets like the other compounds, so their range is 3 × the rep
-range, with the same set cap.
-
-History logged under the one-set rule is a single set, so it converts to a
-total under the new range (`100 × 9` against 18-30). The first session back
-reads as "repeat it" at the bottom of the range. That is expected, once.
-
-The weekly hard-set guardrail on the Stats tab still leaves leg muscles out
-(`GUARDRAIL_EXEMPT_MUSCLES`), because one exercise per day is still the
-programme's recovery choice.
+**Normal and High only:** everything else: all dumbbell work (stabiliser
+limited), all cable isolation, leg extension and hamstring curls (knee and
+hamstring risk under near-maximal load), and every custom variant.
 
 ## Visual language
 
@@ -182,47 +206,48 @@ and which way am I pushing". Everything else is one tap away.
 
 **Hierarchy.** Only the exercise being worked on is expanded; the rest collapse
 to a single fixed-height line. Before a session starts, tapping a card opens it
-as a preview: the target, the band chips and history all work, but logging and
-ticking wait for the session, so a stray tap cannot save anything. The
-instruction is two values at `t-display` —
-**weight × total** — and nothing else on the card is that size.
+as a preview: the target, the variation and band chips and history all work,
+but logging and ticking wait for the session. The instruction is two values at
+`t-display`, **weight × reps**, and nothing else on the card is that size.
 
 ```
-80   ×   25↑
-KG       TOTAL REPS
+80   ×   6, 6, 5↑
+KG       REPS · 3 SETS
 ```
 
-Above it sit the band chips. Below it sit the total bar, a short note only
-where a bare number would confuse (a back-off, a baseline, a weight step), and
-the highlighted set-cap line.
+When every set aims the same, the reps collapse to one number: `80 × 6`.
 
-**The total bar.** From zero to the top of the range, with the range shaded.
-It fills to where the last session landed and rings today's target. A weight
-step empties it: the new rung starts from nothing, and the ring turns gold
-because that is progress, not failure.
+Above it sit the variation chips (★ first) and the band chips. Below it sit
+the set bars, a short note only where a bare number would confuse, the
+highlighted effort line ("Stop 1-2 reps short") and the `last:` line.
+
+**The set bars.** One bar per set, from zero to the top of the per-set range,
+with the range shaded. Each fills to where that set landed last time and rings
+today's target. A weight step empties them: the new rung starts from nothing,
+and the rings turn gold because that is progress, not failure.
 
 **Arrows.** The arrow sits on whichever quantity should move, driven by
 `prescription.direction` (`move`, `tone`), not by any wording.
 
 | `move` | `tone` | Reads as |
 |---|---|---|
-| `reps` | push | `80 × 25↑` — hold the weight, add reps |
-| `load` | new | `> 80↑ × 18` — go up a weight, bar resets |
-| `load` | back-off | `72↓ × 18` — amber, ease off |
-| `none` | hold | no arrow — repeat or match |
-| `none` | new | no bar fill — set a baseline |
+| `reps` | push | `80 × 6, 6, 5↑`: hold the weight, add reps |
+| `load` | new | `> 80↑ × 4`: go up a weight, bars reset |
+| `load` | back-off | `72↓ × 4`: amber, ease off |
+| `none` | hold | no arrow: once more, repeat or match |
+| `none` | new | no bar fill: set a baseline |
 
-**Colour — one meaning each.**
+**Colour: one meaning each.**
 
 | Colour | Means |
 |---|---|
 | accent | act on this today |
 | success | done |
 | gold | an achievement or a new rung |
-| amber | ease off |
+| amber | ease off, or sets missed |
 | dim / muted | reference only |
 
-**Type — four steps.** `t-display` 20px for instruction numbers, `t-title` 15px
+**Type: four steps.** `t-display` 20px for instruction numbers, `t-title` 15px
 for the exercise name, `t-body` 13px for notes, `t-label` / `t-meta` 11px for
 everything else.
 
@@ -230,21 +255,24 @@ everything else.
 
 Every modal is one `Sheet.svelte`: capped at 85vh, with a sticky header carrying
 a 44px close button, plus Escape and backdrop-tap, so it can be left one-handed
-between sets.
+between sets. The one exception is the restore prompt, which needs an explicit
+choice (`dismissible={false}`).
 
 ## Equipment variations
 
-The same movement on a different station is not the same load. You can add
-your own variation from inside the app ("Cable machine by the pilates room").
-It gets its own movement key and its own history, so numbers stay
-apples-to-apples. With no history on the variant you picked, the app shows a
-sibling's last session as a **reference**, not a target.
+The same movement on a different station is not the same load. Each slot's ★
+pick and its built-in alternatives (from `program.js`) show as chips on the
+card. Each has its own movement key, so its own history. An alternative trains
+like its slot: same sets, range and band.
 
-`variations.js` suggests one or two alternate stations per movement as chips in
-the picker. Nothing is created until you tap one. Custom variants are never
-Low-band eligible: `HEAVY_ELIGIBLE` lists specific stable setups, and a
-substitution made because the gym was busy is not where you test near-maximal
-work.
+You can also add your own variation from inside the app ("Cable machine by
+the pilates room"). It gets its own movement key and history too. With no
+history on the variant you picked, the app shows a sibling's last session as a
+**reference**, not a target. `variations.js` suggests extra stations; nothing
+is created until you tap one. Custom variants are never Low-band eligible.
 
-The programme ships no built-in alternatives — `verify-program.js` asserts
-there are none.
+## Myo-reps are retired
+
+Twelve slots used to be myo-reps. The programme no longer has a `method`
+field, and `verify-program.js` asserts that. Old myo-rep sessions keep their
+totals (see above).

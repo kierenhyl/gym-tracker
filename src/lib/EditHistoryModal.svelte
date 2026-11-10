@@ -1,6 +1,7 @@
 <script>
 	import { sessions, editLogEntry, deleteLogEntry } from './store.js';
 	import { bandLabel } from './bands.js';
+	import { formatSession } from './sessions.js';
 	import { slide } from 'svelte/transition';
 	import Sheet from './Sheet.svelte';
 
@@ -69,7 +70,7 @@
 		<div class="mb-4">
 			<p class="font-mono t-meta text-text-dim leading-relaxed">
 				Records are worked out from these rows, so fixing a wrong number here fixes the record.
-				Sessions logged set by set count as the total of their sets.
+				A session's score is its weight × the reps of every set at that weight.
 			</p>
 		</div>
 
@@ -79,7 +80,7 @@
 				{#each Object.entries(bestByBand) as [band, best]}
 					<div class="px-2.5 py-1.5 rounded-lg bg-pr/10 border border-pr/20">
 						<div class="font-mono t-meta text-pr/70 tracking-wider">{bandLabel(band)}</div>
-						<div class="font-mono text-sm font-bold text-pr">{best.weight}kg × {best.total}</div>
+						<div class="font-mono text-sm font-bold text-pr">{formatSession(best)}</div>
 					</div>
 				{/each}
 			</div>
@@ -145,7 +146,7 @@
 										<span class="font-mono t-meta tracking-wider text-text-dim">{bandLabel(session.band)}</span>
 										<span class="font-mono t-meta text-text-muted">{formatDate(entry.date)}</span>
 										{#if !isTotal(entry)}
-											<span class="font-mono t-meta text-text-muted">ONE SET OF {session.weight} × {session.total}</span>
+											<span class="font-mono t-meta text-text-muted">ONE SET OF {formatSession(session)}</span>
 										{/if}
 										{#if isBest}
 											<span class="font-mono t-meta font-bold tracking-wider text-pr">BEST</span>

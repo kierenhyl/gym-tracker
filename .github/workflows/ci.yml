@@ -22,8 +22,8 @@ jobs:
 
       - run: npm ci
 
-      # The programme's own assertion script: no alternatives, exactly one leg
-      # exercise per day, and the total-rep progression rules.
+      # The programme's own assertion script: heavy slots, sets per muscle, and
+      # worked examples of the per-set progression rules.
       - run: npm run verify:program
 
       # Pure sync helpers: recognising our own save after a lost reply, and

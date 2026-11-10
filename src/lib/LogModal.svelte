@@ -1,8 +1,9 @@
 <script>
 	import { logSession } from './store.js';
-	import { bandLabel, sessionScore, MAX_SETS } from './bands.js';
-	import { KIND_LABELS, preview } from './prescribe.js';
-	import TotalBar from './TotalBar.svelte';
+	import { bandLabel, sessionScore } from './bands.js';
+	import { mainWeight } from './sessions.js';
+	import { KIND_LABELS, preview, repsLabel } from './prescribe.js';
+	import SetBars from './SetBars.svelte';
 	import { fade } from 'svelte/transition';
 	import Sheet from './Sheet.svelte';
 
@@ -10,23 +11,47 @@
 	// record:   the best session in today's band, for the new-best flash
 	let { exercise, prescription, sessions = [], record = null, readiness, onClose, onExerciseComplete, onPR } = $props();
 
-	// Two numbers, typed. The weight starts at today's target; after topping the
-	// range it starts empty, because only you know the next step on this machine.
-	let weight = $state(prescription?.loadUp ? '' : (prescription?.targetLoad ?? prescription?.last?.weight ?? ''));
-	let total = $state('');
+	// One row per programmed set, pre-filled with today's target: you only
+	// touch a number you missed. After topping the range the weight starts
+	// empty, because only you know the next step on this machine; the first
+	// weight you type fills the rows you haven't changed.
+	const count = prescription?.sets ?? exercise.sets ?? 3;
+	const startWeight = prescription?.loadUp ? '' : (prescription?.targetLoad ?? prescription?.last?.weight ?? '');
+	let rows = $state(
+		Array.from({ length: count }, (_, i) => ({
+			weight: startWeight,
+			reps: prescription?.targetReps?.[i] ?? '',
+			weightTouched: false
+		}))
+	);
 	let showPRFlash = $state(false);
 
-	let w = $derived(parseFloat(weight));
-	let t = $derived(parseInt(total));
-	let canSave = $derived(w > 0 && t > 0);
+	function setWeight(i, value) {
+		rows[i].weight = value;
+		rows[i].weightTouched = true;
+		if (i === 0) {
+			for (let j = 1; j < rows.length; j++) if (!rows[j].weightTouched) rows[j].weight = value;
+		}
+	}
+
+	let done = $derived(
+		rows
+			.map((r) => ({ weight: parseFloat(r.weight), reps: parseInt(r.reps) }))
+			.filter((r) => r.weight > 0 && r.reps > 0)
+	);
+	let canSave = $derived(done.length > 0);
 	let band = $derived(prescription?.band ?? exercise.defaultBand);
-	let lo = $derived(prescription?.targetLow);
-	let hi = $derived(prescription?.targetHigh);
+	let lo = $derived(prescription?.lo);
+	let hi = $derived(prescription?.hi);
 
-	let beatsRecord = $derived(canSave && (!record || sessionScore(w, t) > record.score));
+	// Scored the way sessions.js will read it back: the sets at the main weight.
+	let w = $derived(canSave ? mainWeight(done) : null);
+	let atMain = $derived(done.filter((r) => r.weight === w).map((r) => r.reps));
+	let score = $derived(canSave ? sessionScore(w, atMain.reduce((a, b) => a + b, 0)) : 0);
+	let beatsRecord = $derived(canSave && (!record || score > record.score));
 
-	// What this total means for next time, by the same rules that set today's.
-	let next = $derived(canSave ? preview({ exercise, sessions, band, weight: w, total: t }) : null);
+	// What these sets mean for next time, by the same rules that set today's.
+	let next = $derived(canSave ? preview({ exercise, sessions, band, weight: w, reps: atMain }) : null);
 	const TONE_TEXT = { push: 'text-accent', new: 'text-pr', hold: 'text-text-dim', 'back-off': 'text-amber' };
 
 	// Same hero row and arrow language as the card, so the two screens read
@@ -43,14 +68,11 @@
 			? '—'
 			: `${prescription.loadUp ? '> ' : ''}${prescription.targetLoad}${loadArrow}`
 	);
-	let repsText = $derived(
-		prescription?.targetReps == null ? `${lo}-${hi}` : `${prescription.targetReps}${repsArrow}`
-	);
 
 	function handleSave() {
 		if (!canSave) return;
 		const isPR = beatsRecord && !!record;
-		logSession(exercise, { weight: w, total: t, band }, { readiness });
+		logSession(exercise, { sets: done, band }, { readiness });
 		if (isPR) {
 			showPRFlash = true;
 			onPR();
@@ -63,7 +85,7 @@
 	function finish() { onExerciseComplete(); onClose(); }
 </script>
 
-<Sheet eyebrow="{bandLabel(band)} · {lo}-{hi} total" title={exercise.name} {onClose}>
+<Sheet eyebrow="{bandLabel(band)} · {count} × {lo}-{hi}" title={exercise.name} {onClose}>
 
 		{#if prescription}
 			<div class="mb-4 rounded-xl border border-accent/25 bg-accent/5 p-3.5">
@@ -74,38 +96,46 @@
 					</div>
 					<span class="t-display font-mono text-text-dim/50">×</span>
 					<div>
-						<div class="t-display font-mono font-bold tabular-nums {repsArrow ? toneText : 'text-text'}">{repsText}</div>
-						<div class="t-label text-text-muted">total reps</div>
+						<div class="t-display font-mono font-bold tabular-nums {repsArrow ? toneText : 'text-text'}">{repsLabel(prescription)}{repsArrow}</div>
+						<div class="t-label text-text-muted">reps · {count} sets</div>
 					</div>
 					<span class="t-label ml-auto flex-shrink-0 text-right {toneText}">{KIND_LABELS[prescription.kind] ?? 'today'}</span>
 				</div>
-				<p class="t-meta text-accent">No more than {MAX_SETS} sets to reach this</p>
+				<p class="t-meta text-accent">{exercise.effort ?? 'Stop 1-2 reps short'}</p>
 				{#if prescription.note}
 					<p class="t-meta mt-1 {tone === 'back-off' ? 'text-amber' : 'text-text-muted'}">{prescription.note}</p>
 				{/if}
 			</div>
 		{/if}
 
-		<!-- Two numbers. Nothing per set. -->
-		<div class="grid grid-cols-2 gap-2.5 mb-4">
-			<label class="block">
-				<span class="block text-center font-mono t-meta text-text-muted tracking-wider mb-1.5">WEIGHT (KG)</span>
-				<input type="number" inputmode="decimal" step="any" bind:value={weight}
-					placeholder={prescription?.loadUp ? `> ${prescription.targetLoad}` : '0'}
-					class="w-full h-16 px-3 rounded-xl bg-bg-input border border-border text-2xl font-mono font-bold text-center focus:outline-none focus:border-accent" />
-			</label>
-			<label class="block">
-				<span class="block text-center font-mono t-meta text-text-muted tracking-wider mb-1.5">TOTAL REPS</span>
-				<!-- svelte-ignore a11y_autofocus -->
-				<input type="number" inputmode="numeric" bind:value={total} autofocus={!prescription?.loadUp}
-					placeholder={String(prescription?.targetReps ?? lo ?? 0)}
-					class="w-full h-16 px-3 rounded-xl bg-bg-input border border-border text-2xl font-mono font-bold text-center focus:outline-none focus:border-accent" />
-			</label>
+		<!-- One row per set, pre-filled. Clear the reps to skip a set. -->
+		<div class="mb-4">
+			<div class="grid grid-cols-[2.5rem_1fr_1fr] gap-2 mb-1.5">
+				<span></span>
+				<span class="text-center font-mono t-meta text-text-muted tracking-wider">KG</span>
+				<span class="text-center font-mono t-meta text-text-muted tracking-wider">REPS</span>
+			</div>
+			<div class="space-y-2">
+				{#each rows as row, i}
+					<div class="grid grid-cols-[2.5rem_1fr_1fr] gap-2 items-center">
+						<span class="font-mono t-label text-text-muted text-center">SET {i + 1}</span>
+						<input type="number" inputmode="decimal" step="any" aria-label="Set {i + 1} weight"
+							value={row.weight} oninput={(e) => setWeight(i, e.currentTarget.value)}
+							placeholder={prescription?.loadUp ? `> ${prescription.targetLoad}` : '0'}
+							class="w-full h-12 px-2 rounded-xl bg-bg-input border border-border text-xl font-mono font-bold text-center focus:outline-none focus:border-accent" />
+						<input type="number" inputmode="numeric" aria-label="Set {i + 1} reps"
+							bind:value={row.reps}
+							placeholder={String(lo ?? 0)}
+							class="w-full h-12 px-2 rounded-xl bg-bg-input border border-border text-xl font-mono font-bold text-center focus:outline-none focus:border-accent" />
+					</div>
+				{/each}
+			</div>
 		</div>
 
-		<!-- What that total means for next time. -->
+		<!-- What these sets mean for next time. -->
 		<div class="mb-4 min-h-14">
-			<TotalBar {lo} {hi} from={t > 0 ? t : null} to={prescription?.targetReps ?? null} tone={next?.tone === 'back-off' ? 'back-off' : 'push'} />
+			<SetBars {lo} {hi} sets={count} from={rows.map((r) => (parseInt(r.reps) > 0 ? parseInt(r.reps) : null))}
+				to={prescription?.targetReps ?? null} tone={next?.tone === 'back-off' ? 'back-off' : 'push'} />
 			{#if next}
 				<p class="t-meta mt-1 {TONE_TEXT[next.tone]}">
 					{next.text}{#if beatsRecord && record}<span class="text-pr">{' · new best'}</span>{/if}

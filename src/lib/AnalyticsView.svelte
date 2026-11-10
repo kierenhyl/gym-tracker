@@ -1,4 +1,5 @@
 <script>
+	import { formatSession } from './sessions.js';
 	import {
 		workoutLog,
 		sessions,
@@ -14,21 +15,37 @@
 		recordKey,
 		recordLabel,
 		weeklySetsByMuscle,
+		plannedSetsByMuscle,
+		customVariants,
 		stalledMovements,
 		WEEKLY_SETS_MIN,
 		WEEKLY_SETS_MAX
 	} from './store.js';
 
 	// --- Fatigue guardrails: the "am I overdoing it" side of the ledger ---
-	let weeklySets = $derived(
-		Object.entries(weeklySetsByMuscle($sessionHistory))
-			.map(([muscle, sets]) => ({
-				muscle,
-				sets,
-				state: sets > WEEKLY_SETS_MAX ? 'over' : sets < WEEKLY_SETS_MIN ? 'under' : 'ok'
-			}))
-			.sort((a, b) => b.sets - a.sets)
-	);
+	// Sets you logged this week (indirect at half). The bars show the 10-20
+	// research range. The alert only fires for over 20, or for fewer sets than
+	// the sessions you finished this week planned: some muscles (calves, abs)
+	// are programmed below 10 on purpose, and flagging them every week would
+	// make the alert meaningless.
+	let weeklySets = $derived.by(() => {
+		const done = weeklySetsByMuscle($workoutLog, $customVariants);
+		const planned = plannedSetsByMuscle($sessionHistory);
+		const muscles = new Set([...Object.keys(done), ...Object.keys(planned)]);
+		return [...muscles]
+			.map((muscle) => {
+				const sets = done[muscle] ?? 0;
+				const plan = planned[muscle] ?? 0;
+				return {
+					muscle,
+					sets,
+					plan,
+					state: sets > WEEKLY_SETS_MAX ? 'over' : sets < plan ? 'under' : 'ok',
+					inRange: sets >= WEEKLY_SETS_MIN && sets <= WEEKLY_SETS_MAX
+				};
+			})
+			.sort((a, b) => b.sets - a.sets);
+	});
 	let stalled = $derived(stalledMovements($sessions).slice(0, 6));
 
 	// --- Headline stats ---
@@ -136,8 +153,8 @@
 			</div>
 		</div>
 
-		<!-- Guardrails -->
-		{#if stalled.length || weeklySets.some((m) => m.state !== 'ok')}
+		<!-- Guardrails. Under = fewer sets than the week's finished sessions planned. -->
+		{#if stalled.length || weeklySets.length}
 			<div class="rounded-xl bg-bg-card border border-border p-3 mb-4">
 				<div class="font-mono t-meta text-text-muted tracking-wider mb-2">RECOVERY CHECK</div>
 
@@ -159,7 +176,7 @@
 				{#if weeklySets.length}
 					<div>
 						<div class="font-mono t-meta text-text-dim tracking-wider mb-1.5">
-							HARD SETS THIS WEEK · TARGET {WEEKLY_SETS_MIN}-{WEEKLY_SETS_MAX} PER MUSCLE
+							HARD SETS · 7 DAYS · RANGE {WEEKLY_SETS_MIN}-{WEEKLY_SETS_MAX} PER MUSCLE · INDIRECT ×0.5
 						</div>
 						<div class="space-y-1">
 							{#each weeklySets as m}
@@ -167,11 +184,11 @@
 									<span class="font-mono t-meta text-text-muted w-20 flex-shrink-0 truncate">{m.muscle}</span>
 									<div class="flex-1 h-1.5 rounded-full bg-bg-input overflow-hidden">
 										<div
-											class="h-full rounded-full {m.state === 'over' ? 'bg-danger' : m.state === 'under' ? 'bg-text-muted' : 'bg-success'}"
+											class="h-full rounded-full {m.state === 'over' ? 'bg-danger' : m.state === 'under' ? 'bg-amber' : m.inRange ? 'bg-success' : 'bg-text-muted'}"
 											style="width: {Math.min(100, (m.sets / WEEKLY_SETS_MAX) * 100)}%"
 										></div>
 									</div>
-									<span class="font-mono t-meta w-6 text-right {m.state === 'over' ? 'text-danger' : m.state === 'under' ? 'text-text-muted' : 'text-success'}">{m.sets}</span>
+									<span class="font-mono t-meta w-12 text-right {m.state === 'over' ? 'text-danger' : m.state === 'under' ? 'text-amber' : 'text-text-dim'}">{m.sets}{m.state === 'under' ? `/${m.plan}` : ''}</span>
 								</div>
 							{/each}
 						</div>
@@ -224,7 +241,7 @@
 							<div class="flex-1 min-w-0">
 								<div class="text-sm font-medium truncate">{c.name}</div>
 								<div class="font-mono t-meta text-text-muted">
-									now {c.points.at(-1).weight}kg × {c.points.at(-1).total} · {c.points.length} sessions
+									now {c.points.at(-1).text} · {c.points.length} sessions
 								</div>
 							</div>
 							<svg viewBox="0 0 120 30" class="w-[120px] h-[30px] flex-shrink-0 overflow-visible" preserveAspectRatio="none">
@@ -257,7 +274,7 @@
 								<div class="text-sm font-medium">{recordLabel(pr.key)}</div>
 								<div class="font-mono t-meta text-text-muted">{fmtDate(pr.date)}</div>
 							</div>
-							<div class="font-mono text-sm font-bold text-pr">{pr.weight}kg × {pr.total}</div>
+							<div class="font-mono text-sm font-bold text-pr">{formatSession(pr)}</div>
 						</div>
 					{/each}
 				</div>

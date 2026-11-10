@@ -1,27 +1,58 @@
 // Per-movement training configuration: which bands each movement may be
-// trained in, and the total-rep range each band targets. See
-// docs/training-model.md for the reasoning.
+// trained in, the per-set rep range each band targets, and which muscles a
+// movement works indirectly. See docs/training-model.md for the reasoning.
 
 import { BANDS, BAND_ORDER, classifyBand, nearestEligibleBand } from './bands.js';
 
 // The low-rep band is allowed only where the setup is stable and a
 // near-maximal effort does not depend on stabilisers, balance, or spinal
-// position. This is a safety rule, not a preference.
+// position. This is a safety rule, not a preference. Custom variants are
+// never in this list.
 export const HEAVY_ELIGIBLE = new Set([
 	'smith-bench-press',
+	'machine-chest-press',
 	'machine-shoulder-press',
+	'smith-shoulder-press',
 	'machine-incline-press',
 	'chest-supported-row',
 	'machine-row',
 	'neutral-pulldown',
+	'wide-pulldown',
 	'hack-squat',
+	'leg-press',
+	'belt-squat',
 	'machine-hip-thrust'
 ]);
 
-// One leg exercise per day is a deliberate recovery choice (asserted by
-// scripts/verify-program.js). The weekly hard-set guardrail must not report
-// these muscles as under-dosed.
-export const GUARDRAIL_EXEMPT_MUSCLES = new Set(['Quads', 'Hamstrings', 'Glutes', 'Calves']);
+// Indirect work, counted at half a set on the Stats tab. Pressing works the
+// triceps and front delts; rows and pulldowns work the biceps and rear delts;
+// squat patterns work the glutes. A movement never counts indirectly towards
+// its own direct muscle.
+const PRESS = ['Triceps', 'Front Delts'];
+const PULL = ['Biceps', 'Rear Delts'];
+const SQUAT = ['Glutes'];
+export const INDIRECT_MUSCLES = {
+	'smith-bench-press': PRESS,
+	'machine-chest-press': PRESS,
+	'machine-incline-press': PRESS,
+	'incline-db-press': PRESS,
+	'machine-shoulder-press': PRESS,
+	'smith-shoulder-press': PRESS,
+	'chest-supported-row': PULL,
+	'machine-row': PULL,
+	'seated-cable-row': PULL,
+	'neutral-pulldown': PULL,
+	'wide-pulldown': PULL,
+	'half-kneel-pulldown': PULL,
+	'hack-squat': SQUAT,
+	'leg-press': SQUAT,
+	'belt-squat': SQUAT
+};
+export const INDIRECT_WEIGHT = 0.5;
+
+export function indirectMusclesFor(movement, directMuscle) {
+	return (INDIRECT_MUSCLES[movement] ?? []).filter((m) => m !== directMuscle);
+}
 
 // "8-12" / "10-15 each side" -> [8, 12]
 export function parseRepRange(repRange) {
@@ -44,28 +75,27 @@ export function structureFor(method) {
 	return method === 'myorep' ? 'myorep' : 'straight';
 }
 
-// The band the programme's own range sits in gets that range verbatim — the
-// band is declared now, so there is nothing to clamp against. Other bands use
-// their default per-set range. Either way the target is a total: sets × range.
-export function bandConfigFor(movement, repRange, sets = 3) {
+// band: the slot's declared band (heavy slots say 'heavy'). Without one, the
+// band the range sits in. The programmed band gets the programmed per-set
+// range; other bands, or a fallback when the programmed band is not allowed
+// on this movement, use the band's default range.
+export function bandConfigFor(movement, repRange, sets = 3, band = null) {
 	const range = parseRepRange(repRange);
-	const preferred = bandForRange(range);
+	const preferred = band ?? bandForRange(range);
 	const eligible = BAND_ORDER.filter((b) => b !== 'heavy' || HEAVY_ELIGIBLE.has(movement));
 	const defaultBand = eligible.includes(preferred)
 		? preferred
 		: nearestEligibleBand(preferred, eligible);
-	const n = Math.max(1, Number(sets) || 1);
 
-	const targetTotals = {};
-	for (const band of eligible) {
-		const [lo, hi] = band === defaultBand && range ? range : BANDS[band].perSet;
-		targetTotals[band] = [lo * n, hi * n];
+	const ranges = {};
+	for (const b of eligible) {
+		ranges[b] = b === preferred && range ? range : [...BANDS[b].perSet];
 	}
 
-	return { bands: eligible, defaultBand, targetTotals };
+	return { bands: eligible, defaultBand, ranges, sets: Math.max(1, Number(sets) || 1) };
 }
 
 // Attach the derived training model to a raw programme slot.
 export function withTrainingModel(slot) {
-	return { ...slot, ...bandConfigFor(slot.movement, slot.repRange, slot.sets) };
+	return { ...slot, ...bandConfigFor(slot.movement, slot.repRange, slot.sets, slot.band) };
 }
